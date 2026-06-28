@@ -1,8 +1,11 @@
 package application_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/incu6us/markdex/internal/application"
@@ -35,7 +38,7 @@ func TestSearchServiceReranksCandidates(t *testing.T) {
 		return ranked[:topK], nil
 	}}
 
-	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 	hits, err := service.Search(context.Background(), "q", 2, domain.Filter{}, false)
 	if err != nil {
 		t.Fatalf("search: %v", err)
@@ -66,7 +69,7 @@ func TestSearchServiceExpandsToSection(t *testing.T) {
 	reranker := &fakeReranker{rerank: func(_ string, _ []string, _ int) ([]domain.Ranked, error) {
 		return []domain.Ranked{{Index: 0, Score: 0.9}}, nil
 	}}
-	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 
 	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, true)
 	if err != nil {
@@ -74,6 +77,34 @@ func TestSearchServiceExpandsToSection(t *testing.T) {
 	}
 	if len(hits) != 1 || hits[0].Document != "the full reassembled section text" {
 		t.Fatalf("expand: hit document = %q", hits[0].Document)
+	}
+}
+
+func TestSearchServiceLogsAndFallsBackWhenExpandFails(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	repo.searchHits = []domain.SearchHit{
+		{ID: "a", Document: "small chunk", Metadata: map[string]string{"source_id": "s", "heading_path": "h"}},
+	}
+	repo.sectionErr = errors.New("scroll failed")
+	reranker := &fakeReranker{rerank: func(string, []string, int) ([]domain.Ranked, error) {
+		return []domain.Ranked{{Index: 0, Score: 0.9}}, nil
+	}}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, logger)
+
+	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, true)
+	if err != nil {
+		t.Fatalf("expand failure must not fail the whole search: %v", err)
+	}
+	if len(hits) != 1 || hits[0].Document != "small chunk" {
+		t.Fatalf("should fall back to the matched chunk, got %q", hits[0].Document)
+	}
+	if !strings.Contains(buf.String(), "scroll failed") {
+		t.Fatalf("section error should be logged, got %q", buf.String())
 	}
 }
 
@@ -85,7 +116,7 @@ func TestSearchServiceEmptyCandidates(t *testing.T) {
 		t.Fatal("reranker should not be called with no candidates")
 		return nil, nil
 	}}
-	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 
 	hits, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false)
 	if err != nil || hits != nil {
@@ -99,7 +130,7 @@ func TestSearchServicePropagatesSearchError(t *testing.T) {
 	repo := newFakeRepository()
 	repo.searchErr = errors.New("qdrant down")
 	reranker := &fakeReranker{rerank: func(string, []string, int) ([]domain.Ranked, error) { return nil, nil }}
-	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 
 	if _, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false); !errors.Is(err, repo.searchErr) {
 		t.Fatalf("err = %v, want %v", err, repo.searchErr)

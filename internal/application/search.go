@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/incu6us/markdex/internal/domain"
 )
@@ -13,6 +14,7 @@ type SearchService struct {
 	repo     domain.VectorRepository
 	reranker domain.Reranker
 	poolSize int
+	logger   *slog.Logger
 }
 
 func NewSearchService(
@@ -20,15 +22,20 @@ func NewSearchService(
 	repo domain.VectorRepository,
 	reranker domain.Reranker,
 	poolSize int,
+	logger *slog.Logger,
 ) *SearchService {
 	if poolSize < 1 {
 		poolSize = defaultPoolSize
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return &SearchService{
 		embedder: embedder,
 		repo:     repo,
 		reranker: reranker,
 		poolSize: poolSize,
+		logger:   logger,
 	}
 }
 
@@ -71,7 +78,16 @@ func (s *SearchService) Search(ctx context.Context, query string, topK int, filt
 		hit := candidates[r.Index]
 		hit.Score = r.Score
 		if expand {
-			if section, err := s.repo.Section(ctx, hit.Metadata["source_id"], hit.Metadata["heading_path"]); err == nil && section != "" {
+			// Expansion is best-effort: on failure, log and keep the matched chunk
+			// rather than failing the whole search.
+			section, err := s.repo.Section(ctx, hit.Metadata["source_id"], hit.Metadata["heading_path"])
+			switch {
+			case err != nil:
+				s.logger.Warn("expand: section reassembly failed; keeping chunk",
+					"source_id", hit.Metadata["source_id"],
+					"heading_path", hit.Metadata["heading_path"],
+					"err", err)
+			case section != "":
 				hit.Document = section
 			}
 		}

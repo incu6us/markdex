@@ -100,7 +100,7 @@ func serveAPI(
 		Creator:  &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
 		Deleter:  &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
 		Headings: &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
-		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize},
+		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize, logger: logger},
 		Jobs:     manager,
 		Model:    model,
 		UI:       embeddedUI(logger),
@@ -185,11 +185,12 @@ type chunkSearcher struct {
 	apiKey    string
 	schema    domain.CollectionSchema
 	poolSize  int
+	logger    *slog.Logger
 }
 
 func (s *chunkSearcher) Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error) {
 	repo := qdrant.NewRepository(s.qdrantURL, s.apiKey, collection, s.schema)
-	service := application.NewSearchService(s.embedder, repo, s.reranker, s.poolSize)
+	service := application.NewSearchService(s.embedder, repo, s.reranker, s.poolSize, s.logger)
 	return service.Search(ctx, query, topK, filter, expand)
 }
 
