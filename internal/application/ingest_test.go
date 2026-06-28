@@ -85,6 +85,21 @@ func (r *fakeRepository) Section(_ context.Context, _, _ string) (string, error)
 	return r.sectionText, r.sectionErr
 }
 
+func (r *fakeRepository) ListSources(context.Context) ([]string, error) {
+	out := make([]string, 0, len(r.bySource))
+	for id := range r.bySource {
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func (r *fakeRepository) DeleteSources(_ context.Context, ids []string) error {
+	for _, id := range ids {
+		delete(r.bySource, id)
+	}
+	return nil
+}
+
 func (r *fakeRepository) stored() int {
 	total := 0
 	for _, chunks := range r.bySource {

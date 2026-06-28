@@ -483,6 +483,56 @@ func TestHandleIngestUploadDirEmpty(t *testing.T) {
 	}
 }
 
+func TestHandleIngestGithubRepoPrune(t *testing.T) {
+	t.Parallel()
+
+	lister := &stubRepoLister{urls: []string{
+		"https://raw.githubusercontent.com/o/r/main/a.md",
+		"https://raw.githubusercontent.com/o/r/main/docs/b.md",
+	}}
+	ingester := &capturingIngester{}
+	handler := newTestServer(t, testDeps{repoLister: lister, ingester: ingester})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+		"source":     map[string]any{"type": "github_repo", "url": "https://github.com/o/r"},
+		"collection": "go-guide",
+		"prune":      true,
+	})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body)
+	}
+	jobID := decodeBody[struct {
+		JobID string `json:"job_id"`
+	}](t, rec).JobID
+	waitForJob(t, handler, jobID)
+
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
+	if got := ingester.spec.ReconcileScope; got != "https://raw.githubusercontent.com/o/r/" {
+		t.Fatalf("ReconcileScope = %q, want the repo prefix", got)
+	}
+}
+
+func TestHandleIngestGithubRepoNoPrune(t *testing.T) {
+	t.Parallel()
+	lister := &stubRepoLister{urls: []string{"https://raw.githubusercontent.com/o/r/main/a.md"}}
+	ingester := &capturingIngester{}
+	handler := newTestServer(t, testDeps{repoLister: lister, ingester: ingester})
+	rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+		"source":     map[string]any{"type": "github_repo", "url": "https://github.com/o/r"},
+		"collection": "go-guide",
+	})
+	jobID := decodeBody[struct {
+		JobID string `json:"job_id"`
+	}](t, rec).JobID
+	waitForJob(t, handler, jobID)
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
+	if ingester.spec.ReconcileScope != "" {
+		t.Fatalf("ReconcileScope = %q, want empty without prune", ingester.spec.ReconcileScope)
+	}
+}
+
 func TestHandleIngestGithubRepoListError(t *testing.T) {
 	t.Parallel()
 	handler := newTestServer(t, testDeps{repoLister: &stubRepoLister{err: errors.New("repo not found")}})

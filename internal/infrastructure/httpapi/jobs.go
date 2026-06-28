@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,23 @@ type IngestSpec struct {
 	URLs []string
 	// Files, when set, are in-memory documents to ingest as one job (folder upload).
 	Files []FileSpec
+	// ReconcileScope, when set, prunes chunks whose source_id has this prefix but was
+	// not in this ingest (deleted-from-repo cleanup); empty disables reconciliation.
+	ReconcileScope string
+}
+
+// rawScope returns the scheme://host/owner/repo/ prefix of a raw GitHub file URL,
+// used to scope reconciliation to a single repo's source_ids.
+func rawScope(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	parts := strings.SplitN(strings.TrimPrefix(u.Path, "/"), "/", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/" + parts[0] + "/" + parts[1] + "/"
 }
 
 type Ingester interface {
@@ -156,6 +174,9 @@ type ingestRequest struct {
 	Collection string        `json:"collection"`
 	MaxChars   int           `json:"max_chars"`
 	Overlap    int           `json:"overlap"`
+	// Prune (repo sources only): after ingest, delete chunks for files that no longer
+	// exist in the repo — collection reconciliation, scoped to that repo.
+	Prune bool `json:"prune"`
 }
 
 type ingestResponse struct {
@@ -186,6 +207,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		spec.URLs = urls
+		if req.Prune && len(urls) > 0 {
+			spec.ReconcileScope = rawScope(urls[0])
+		}
 	case "upload_dir":
 		if len(req.Source.Files) == 0 {
 			writeError(w, http.StatusBadRequest, "no files provided")

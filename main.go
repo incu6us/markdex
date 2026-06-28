@@ -236,6 +236,19 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 	if err != nil {
 		return 0, err
 	}
+
+	// Reconciliation: prune chunks for repo files that no longer exist (scoped to the repo).
+	if spec.ReconcileScope != "" {
+		if existing, lerr := repo.ListSources(ctx); lerr != nil {
+			c.logger.Warn("reconcile: list sources failed", "err", lerr)
+		} else if stale := domain.SourcesToPrune(existing, spec.URLs, spec.ReconcileScope); len(stale) > 0 {
+			if derr := repo.DeleteSources(ctx, stale); derr != nil {
+				c.logger.Warn("reconcile: delete stale sources failed", "err", derr)
+			} else {
+				c.logger.Info("reconcile: pruned stale sources", "count", len(stale), "scope", spec.ReconcileScope)
+			}
+		}
+	}
 	return result.Ingested, nil
 }
 

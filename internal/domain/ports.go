@@ -27,4 +27,8 @@ type VectorRepository interface {
 	// Section reassembles the full text of one heading section (all chunks sharing the same
 	// source_id + heading_path), for parent-document retrieval.
 	Section(ctx context.Context, sourceID, headingPath string) (string, error)
+	// ListSources returns the distinct source_id values present in the collection.
+	ListSources(ctx context.Context) ([]string, error)
+	// DeleteSources removes all points belonging to the given source_ids (reconciliation).
+	DeleteSources(ctx context.Context, sourceIDs []string) error
 }

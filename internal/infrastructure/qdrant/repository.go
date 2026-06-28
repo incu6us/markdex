@@ -351,6 +351,71 @@ func (r *Repository) Headings(ctx context.Context) ([]string, error) {
 	return headings, nil
 }
 
+// ListSources scrolls the collection and returns its distinct `metadata.source_id`
+// values (sorted), for reconciliation against the current set of source docs.
+func (r *Repository) ListSources(ctx context.Context) ([]string, error) {
+	seen := map[string]struct{}{}
+	var offset any
+	for {
+		body := map[string]any{"limit": 256, "with_payload": []string{"metadata"}}
+		if offset != nil {
+			body["offset"] = offset
+		}
+
+		var out struct {
+			Result struct {
+				Points []struct {
+					Payload struct {
+						Metadata struct {
+							SourceID string `json:"source_id"`
+						} `json:"metadata"`
+					} `json:"payload"`
+				} `json:"points"`
+				NextPageOffset any `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := r.do(ctx, http.MethodPost, "/collections/"+r.collection+"/points/scroll", body, &out); err != nil {
+			return nil, fmt.Errorf("scroll sources in %q: %w", r.collection, err)
+		}
+
+		for _, point := range out.Result.Points {
+			if s := point.Payload.Metadata.SourceID; s != "" {
+				seen[s] = struct{}{}
+			}
+		}
+		if out.Result.NextPageOffset == nil {
+			break
+		}
+		offset = out.Result.NextPageOffset
+	}
+
+	sources := make([]string, 0, len(seen))
+	for s := range seen {
+		sources = append(sources, s)
+	}
+	sort.Strings(sources)
+	return sources, nil
+}
+
+// DeleteSources removes all points whose metadata.source_id is in sourceIDs.
+func (r *Repository) DeleteSources(ctx context.Context, sourceIDs []string) error {
+	if len(sourceIDs) == 0 {
+		return nil
+	}
+	body := map[string]any{
+		"filter": map[string]any{
+			"must": []map[string]any{
+				{"key": "metadata.source_id", "match": map[string]any{"any": sourceIDs}},
+			},
+		},
+	}
+	path := "/collections/" + r.collection + "/points/delete?wait=true"
+	if err := r.do(ctx, http.MethodPost, path, body, nil); err != nil {
+		return fmt.Errorf("delete sources in %q: %w", r.collection, err)
+	}
+	return nil
+}
+
 // Delete removes the entire collection (points and config) from Qdrant.
 func (r *Repository) Delete(ctx context.Context) error {
 	if err := r.do(ctx, http.MethodDelete, "/collections/"+r.collection, nil, nil); err != nil {

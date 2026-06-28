@@ -91,8 +91,13 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       (`Accept: application/vnd.github.raw`) rather than `raw.githubusercontent.com`. Verified
       end-to-end against a **real private repo** (created → ingested → searched → deleted).
 - [ ] **Scheduled / incremental re-sync** — refresh sources on a schedule, not just manually.
-- [ ] **Collection reconciliation** — remove points for source docs that no longer exist
-      (delete-by-source only handles re-ingested docs; vanished ones leave orphans).
+- [x] **Collection reconciliation** — re-ingesting a `github_repo` with `prune: true` deletes
+      chunks for files that no longer exist in the repo (idempotent re-ingest only replaced docs
+      it *re*-ingested, leaving vanished ones as orphans). Scoped to the repo's raw-URL prefix
+      (`domain.SourcesToPrune`) so other sources in the collection are never touched; backed by
+      `Repository.ListSources` + `DeleteSources`. UI: a "remove deleted files" checkbox on the
+      GitHub repo source. Verified e2e (whole repo 170 pts → re-ingest `docs/` subpath with prune
+      → 30 pts, README's chunks gone from search).
 
 ## Tier 4 — Production hardening
 

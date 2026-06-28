@@ -219,6 +219,8 @@ A request `source` is one of:
   Set `GITHUB_TOKEN` to raise GitHub's 60/hr unauthenticated limit and to reach **private repos**
   — with a token, files are pulled through the authenticated contents API
   (`/repos/{o}/{r}/contents/{path}`) instead of `raw.githubusercontent.com`.
+  Add `"prune": true` (UI: *remove deleted files*) to **reconcile** — delete chunks for files
+  that no longer exist in the repo, scoped to that repo so other sources are untouched.
 - `{ "type": "upload_dir", "files": [{ "name", "content" }, …] }` — ingests **a local folder**
   in one job. The UI's **Local folder** tab reads every `.md` in a picked folder client-side
   (no server-side path / volume mount needed); empty files are skipped.
@@ -278,7 +280,7 @@ internal/domain/                              the model + ubiquitous language
   document.go / chunk.go                      Document, Chunk value objects (Chunk.ContextualText breadcrumb)
   embedding.go / sparse_embedding.go          Embedding, SparseEmbedding; Vectors = {Dense, Sparse}
   embedded_chunk.go / search.go               EmbeddedChunk; CollectionSchema, Filter, SearchHit
-  dedup.go                                    near-duplicate chunk detection (word-shingle Jaccard)
+  dedup.go / reconcile.go                     near-dup detection (shingle Jaccard); SourcesToPrune (reconciliation)
   ports.go / rerank.go / embed_kind.go        DocumentSource / Chunker / Embedder / Reranker / TokenCounter / VectorRepository
 
 internal/application/

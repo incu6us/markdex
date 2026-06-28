@@ -17,6 +17,7 @@ export default function App() {
   const [fileContent, setFileContent] = useState('')
   const [githubUrl, setGithubUrl] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
+  const [pruneRepo, setPruneRepo] = useState(false)
   const [folderFiles, setFolderFiles] = useState([]) // [{name, content}] from a local folder
 
   const [preview, setPreview] = useState(null)
@@ -116,7 +117,8 @@ export default function App() {
     }
     setBusy(true)
     try {
-      const { job_id } = await startIngest({ source: buildSource(), collection })
+      const prune = sourceType === 'github_repo' && pruneRepo
+      const { job_id } = await startIngest({ source: buildSource(), collection, prune })
       subscribeJob(job_id)
     } catch (err) {
       setError(err.message)
@@ -226,6 +228,10 @@ export default function App() {
               onChange={(e) => setRepoUrl(e.target.value)}
             />
             <span className="hint">Ingests every <code>.md</code> in the repo (or subpath). No preview — ingest directly.</span>
+            <label className="checkbox">
+              <input type="checkbox" checked={pruneRepo} onChange={(e) => setPruneRepo(e.target.checked)} />
+              Remove chunks for files deleted from the repo (reconcile)
+            </label>
           </div>
         )}
         {sourceType === 'upload_dir' && (
