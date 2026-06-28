@@ -67,6 +67,19 @@ func TestSearchHandlerDefaultsTopKAndMaps(t *testing.T) {
 	}
 }
 
+func TestSearchHandlerClampsTopK(t *testing.T) {
+	t.Parallel()
+	fake := &fakeService{}
+	d := &toolDeps{svc: fake}
+
+	if _, _, err := d.search(context.Background(), &mcp.CallToolRequest{}, searchInput{Collection: "c", Query: "q", TopK: 100_000}); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if fake.gotSearch.TopK != maxTopK {
+		t.Fatalf("TopK = %d, want clamped to %d", fake.gotSearch.TopK, maxTopK)
+	}
+}
+
 func TestSearchHandlerValidation(t *testing.T) {
 	t.Parallel()
 	d := &toolDeps{svc: &fakeService{}}

@@ -352,7 +352,7 @@ collections and structure before querying:
 | --- | --- | --- |
 | `list_collections` | — | every collection with its point count + dimension |
 | `list_headings` | `{ collection }` | the collection's heading paths (valid `heading_path` filters) |
-| `search` | `{ collection, query, top_k?, expand? }` | reranked chunks, or full sections with `expand` |
+| `search` | `{ collection, query, top_k?, expand? }` | reranked chunks, or full sections with `expand` (`top_k` defaults to 8, capped at 100) |
 
 Each tool returns both human-readable text **and** structured output (the SDK generates an
 `outputSchema` from the typed result). They call markdex's REST API under the hood via the

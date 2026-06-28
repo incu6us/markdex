@@ -25,10 +25,18 @@ type toolDeps struct {
 
 // --- search ---
 
+// top_k is normalized at the tool boundary: missing/non-positive falls back to
+// defaultTopK, and oversized requests are clamped to maxTopK so an agent can't
+// make the backend (and reranker) do unbounded work.
+const (
+	defaultTopK = 8
+	maxTopK     = 100
+)
+
 type searchInput struct {
 	Collection string `json:"collection" jsonschema:"collection name to search"`
 	Query      string `json:"query" jsonschema:"natural-language query"`
-	TopK       int    `json:"top_k,omitempty" jsonschema:"number of results (default 8)"`
+	TopK       int    `json:"top_k,omitempty" jsonschema:"number of results (default 8, max 100)"`
 	Expand     bool   `json:"expand,omitempty" jsonschema:"return the full enclosing section instead of the matched chunk"`
 }
 
@@ -47,7 +55,10 @@ func (d *toolDeps) search(ctx context.Context, _ *mcp.CallToolRequest, in search
 		return nil, searchOutput{}, errors.New("collection and query are required")
 	}
 	if in.TopK < 1 {
-		in.TopK = 8
+		in.TopK = defaultTopK
+	}
+	if in.TopK > maxTopK {
+		in.TopK = maxTopK
 	}
 
 	hits, err := d.svc.Search(ctx, markdexclient.SearchParams{
