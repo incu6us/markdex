@@ -134,5 +134,9 @@ Qdrant 1.18.2 supports prefetch + fusion natively.
       1024), `/embed` (1024-d dense + sparse terms), `/rerank` (correct relevance order).
       Reranking uses the transformers `AutoModelForSequenceClassification` pattern (avoids a
       FlagReranker/transformers slow-tokenizer incompatibility).
-- [ ] Phase 2 — domain ports (`SparseEmbedding`, `Vectors`, `EmbedKind`, `Reranker`)
-- [ ] Phases 3–10
+- [x] Phase 2 — domain primitives (additive, TDD): `SparseEmbedding` (+validation),
+      `Vectors`, `EmbedKind` (Document/Query), `Reranker` port + `Ranked`. Kept additive so
+      the module stays green; the breaking `EmbeddedChunk`/`VectorRepository`/`Embedder`
+      signature swap rides with the qdrant + ingest rewrite (Phases 4–5).
+- [ ] Phase 3 — `embedderclient` (HTTP client to the sidecar; implements Embedder + Reranker)
+- [ ] Phases 4–10
