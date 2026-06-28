@@ -30,6 +30,12 @@ build: ui-build
 test:
 	go test ./...
 
+## eval: measure retrieval quality against a golden set (needs a running stack + ingested data)
+##   override the golden set: make eval GOLDEN=path.json
+GOLDEN ?= cmd/eval/golden/go-style-guide.json
+eval:
+	go run ./cmd/eval -addr http://localhost$(ADDR) -golden $(GOLDEN)
+
 ## docker-build: rebuild the app image (picks up code changes)
 docker-build:
 	docker compose build app

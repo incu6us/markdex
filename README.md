@@ -289,6 +289,21 @@ go test ./...                 # all unit tests
 go vet ./...
 ```
 
+## Retrieval evaluation
+
+`cmd/eval` measures retrieval quality against a golden query set: it posts each query to a
+running `/api/search`, checks whether the expected section is retrieved and how highly it
+ranks, and reports **MRR / Hit@1 / Hit@3 / Hit@k**. Use it to catch regressions and compare
+configs (reranker model, `-pool`, etc.).
+
+```sh
+make eval                                            # needs a running stack with ingested data
+make eval GOLDEN=cmd/eval/golden/go-style-guide.json # custom golden set
+```
+
+A golden set is JSON: `{ collection, top_k, queries: [{ query, relevant_heading_contains }] }`
+— a result counts as relevant if its `heading_path` contains one of the substrings.
+
 ## Roadmap
 
 markdex is a solid ingestion + storage pipeline today. The gaps to make it a robust

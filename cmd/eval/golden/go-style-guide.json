@@ -1,0 +1,23 @@
+{
+  "collection": "go-style-guide",
+  "top_k": 10,
+  "queries": [
+    { "query": "how should I name variables and functions", "relevant_heading_contains": ["naming"] },
+    { "query": "tell me about interfaces in Go", "relevant_heading_contains": ["interfaces"] },
+    { "query": "how do I handle and wrap errors", "relevant_heading_contains": ["error-handling"] },
+    { "query": "writing good documentation and doc comments", "relevant_heading_contains": ["documentation"] },
+    { "query": "table driven tests and test helpers", "relevant_heading_contains": ["tests"] },
+    { "query": "managing global state and package-level variables", "relevant_heading_contains": ["global-state"] },
+    { "query": "how should I organize and group imports", "relevant_heading_contains": ["imports"] },
+    { "query": "declaring local variables", "relevant_heading_contains": ["variable-declarations"] },
+    { "query": "keeping packages small and focused", "relevant_heading_contains": ["package-size"] },
+    { "query": "functions with too many arguments", "relevant_heading_contains": ["function-argument-lists"] },
+    { "query": "building a command line interface", "relevant_heading_contains": ["command-line-interfaces"] },
+    { "query": "efficiently concatenating strings", "relevant_heading_contains": ["string-concatenation"] },
+
+    { "query": "what is the idiomatic way to signal that an operation failed", "relevant_heading_contains": ["error-handling"] },
+    { "query": "choosing good identifiers for things in my code", "relevant_heading_contains": ["naming"] },
+    { "query": "defining a contract that multiple types can satisfy", "relevant_heading_contains": ["interfaces"] },
+    { "query": "avoiding mutable package-level singletons", "relevant_heading_contains": ["global-state"] }
+  ]
+}

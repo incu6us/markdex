@@ -11,16 +11,16 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Tier 1 — Retrieval layer (highest leverage)
 
-The half that determines answer quality. Today retrieval is delegated to the external
-`mcp-server-qdrant` (`qdrant-find`), which does plain dense kNN with the ingest model.
-markdex has no search endpoint of its own.
+The half that determines answer quality. markdex owns retrieval end-to-end via `/api/search`:
+hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder reranking.
 
 - [x] **`/api/search` endpoint** — markdex owns retrieval: query → embed → hybrid Qdrant
       search → rerank → ranked hits with scores + metadata. (sidecar Phases 4–8)
 - [x] **Hybrid search** — dense + sparse (BGE-M3 lexical weights) via Qdrant named/sparse
       vectors, fused with RRF. Verified live against Qdrant 1.18.2.
-- [x] **Cross-encoder reranking** — `bge-reranker-v2-m3` in the sidecar reorders the
-      candidate pool (pool 50 → top-k 8). Verified live.
+- [x] **Cross-encoder reranking** — a cross-encoder in the sidecar reorders the candidate pool
+      (default `cross-encoder/ms-marco-MiniLM-L-6-v2`, pool 24 → top-k; swappable via
+      `RERANK_MODEL`). Verified live.
 - [x] **Query-time metadata filters** — `filter` map on `/api/search` → Qdrant `must`
       conditions on `metadata.*`.
 - [ ] **Parent-document retrieval** — match on small chunks, return the larger enclosing
@@ -65,8 +65,10 @@ markdex has no search endpoint of its own.
 
 ## Tier 5 — Evaluation
 
-- [ ] **Retrieval eval harness** — a golden query set + recall@k / MRR so retrieval quality
-      is measurable. Without numbers we can't call it "robust."
+- [x] **Retrieval eval harness** — `cmd/eval` posts a golden query set to `/api/search` and
+      reports **MRR / Hit@1 / Hit@3 / Hit@k**; pure scoring logic is unit-tested. Run with
+      `make eval`. Baseline on `go-style-guide` (16 queries): MRR 0.91, Hit@1 0.88, Hit@10 1.0.
+      Use it to detect regressions and compare configs (reranker model, pool size).
 
 ---
 
