@@ -298,3 +298,10 @@ internal/infrastructure/httpapi/              handlers + async job lifecycle (ht
 go test ./...                 # all unit tests
 go vet ./...
 ```
+
+## Roadmap
+
+markdex is a solid ingestion + storage pipeline today. The gaps to make it a robust
+knowledge base for AI agents — a retrieval layer it controls (hybrid + reranking), a
+stronger embedder, broader sources, and production hardening — are tracked in
+[`docs/roadmap.md`](docs/roadmap.md), checked off as they ship.

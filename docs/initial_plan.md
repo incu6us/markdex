@@ -136,12 +136,11 @@ Changes made after the five steps above landed:
 - [x] **Default port** — `:4334` (was `:8080`, which is too generic); Vite dev proxy
       points at `:4334`.
 
-### Possible follow-ups (not in scope)
+### Beyond the MVP
 
-- GitHub whole-repo/folder ingestion (currently single raw `.md` URL).
-- Per-topic include/exclude + title editing in the preview before ingest.
-- Authentication on the HTTP API.
-- Qdrant data persistence (`run-qdrant` has no volume mount).
+The gaps to turn this from an ingester into a robust knowledge base for AI agents —
+a retrieval layer markdex controls, a stronger embedder, broader sources, and
+production hardening — are tracked in [roadmap.md](roadmap.md), checked off as they ship.
 
 ## Testing strategy
 
