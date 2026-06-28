@@ -33,8 +33,9 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       Typed I/O + structured output + tool annotations; protocol-version negotiation handled by
       the SDK. Verified end-to-end (initialize → tools/list → call).
 - [x] **Collections management UI** — dedicated **Collections** tab listing every collection
-      (name, points, dimension) with create + delete; delete is guarded by type-to-confirm and
-      backed by `DELETE /api/collections/{name}` → Qdrant `Repository.Delete`.
+      (name, points, dimension) with create + delete; delete asks for a single confirmation and
+      is backed by `DELETE /api/collections/{name}` → Qdrant `Repository.Delete`. Selected
+      collection + active tab persist across tabs and reloads.
 - [x] **Search UI** — Ingest/Search nav in the React app; collection picker + query + `top_k`
       → ranked results (title, heading_path, rerank score, snippet) over `/api/search`.
 

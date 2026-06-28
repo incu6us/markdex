@@ -3,8 +3,7 @@ import { createCollection, deleteCollection } from './api.js'
 
 export default function Collections({ collections, onChange, selected, onSelect }) {
   const [newName, setNewName] = useState('')
-  const [deletingName, setDeletingName] = useState('') // collection awaiting type-to-confirm
-  const [confirmText, setConfirmText] = useState('')
+  const [deletingName, setDeletingName] = useState('') // collection awaiting delete confirmation
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -28,12 +27,10 @@ export default function Collections({ collections, onChange, selected, onSelect 
   function startDelete(name) {
     setError('')
     setDeletingName(name)
-    setConfirmText('')
   }
 
   function cancelDelete() {
     setDeletingName('')
-    setConfirmText('')
   }
 
   async function onConfirmDelete(name) {
@@ -94,18 +91,10 @@ export default function Collections({ collections, onChange, selected, onSelect 
                 {deletingName === c.name && (
                   <div className="confirm-box">
                     <div className="hint">
-                      Type <strong>{c.name}</strong> to permanently delete this collection and all its points.
+                      Permanently delete <strong>{c.name}</strong> and all its points?
                     </div>
                     <div className="field row">
-                      <input
-                        type="text"
-                        value={confirmText}
-                        autoFocus
-                        placeholder={c.name}
-                        onChange={(e) => setConfirmText(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && confirmText === c.name && onConfirmDelete(c.name)}
-                      />
-                      <button className="danger" disabled={confirmText !== c.name || busy} onClick={() => onConfirmDelete(c.name)}>
+                      <button className="danger" autoFocus disabled={busy} onClick={() => onConfirmDelete(c.name)}>
                         Delete
                       </button>
                       <button onClick={cancelDelete} disabled={busy}>
