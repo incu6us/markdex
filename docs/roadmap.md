@@ -23,11 +23,12 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       `RERANK_MODEL`). Verified live.
 - [x] **Query-time metadata filters** — `filter` map on `/api/search` → Qdrant `must`
       conditions on `metadata.*`.
-- [ ] **Parent-document retrieval** — match on small chunks, return the larger enclosing
-      section to the LLM.
-- [ ] **Expose retrieval as an MCP tool** — the dense vector + model changed (now BGE-M3),
-      so stock `qdrant-find` no longer matches; surface the reranked `/api/search` path to
-      agents via an MCP tool instead.
+- [x] **Parent-document retrieval** — `/api/search` `expand` reassembles the full heading
+      section (all chunks sharing `source_id` + `heading_path`, de-overlapped) and returns it
+      in place of the matched chunk. Verified live (2 KB chunk → 8 KB section). Search-UI toggle.
+- [x] **Expose retrieval as an MCP tool** — `cmd/mcp` is a dependency-free MCP (stdio) server
+      exposing a `search` tool over `/api/search`; register with
+      `claude mcp add markdex -- go run ./cmd/mcp`. Verified end-to-end.
 - [x] **Search UI** — Ingest/Search nav in the React app; collection picker + query + `top_k`
       → ranked results (title, heading_path, rerank score, snippet) over `/api/search`.
 

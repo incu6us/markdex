@@ -194,7 +194,7 @@ Endpoints:
 | `POST /api/collections` | Create a collection sized for the embedding model. |
 | `GET /api/collections/{name}/headings` | Distinct `heading_path`s in a collection (for authoring golden sets). |
 | `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }`. |
-| `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. |
+| `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. `expand: true` returns each hit's full enclosing section (parent-document retrieval). |
 | `POST /api/eval` | Score a golden set against search → `{ metrics: { mrr, hit_at_1/3/k }, results }`. |
 | `GET /api/jobs/{id}` | Job state (`pending`/`running`/`succeeded`/`failed`, progress, count). |
 | `GET /api/jobs/{id}/stream` | Server-Sent Events stream of the same job state. |
@@ -268,6 +268,7 @@ internal/infrastructure/
   httpapi/                                    HTTP server: preview / collections / ingest / search / jobs (+ SSE)
 
 cmd/eval/                                     retrieval eval harness (golden set → MRR / Hit@k)
+cmd/mcp/                                       MCP (stdio) server exposing a `search` tool
 services/embedder/                            Python sidecar: BGE-M3 embeddings + cross-encoder reranker
 web/                                          React (Vite) UI for the HTTP API
 ```
@@ -292,6 +293,21 @@ cmd/eval/                                     eval scoring metrics (MRR / Hit@k)
 go test ./...                 # all unit tests
 go vet ./...
 ```
+
+## Use it from an AI agent (MCP)
+
+`cmd/mcp` is a tiny, dependency-free [Model Context Protocol](https://modelcontextprotocol.io)
+(stdio) server that exposes markdex retrieval as a **`search`** tool — so Claude Code (or any
+MCP client) can query a collection with hybrid search + reranking. With markdex running:
+
+```sh
+claude mcp add markdex -e MARKDEX_URL=http://localhost:4334 -- go run ./cmd/mcp
+# or build a binary: go build -o bin/markdex-mcp ./cmd/mcp  →  claude mcp add markdex -- bin/markdex-mcp
+```
+
+The `search` tool takes `{ collection, query, top_k?, expand? }` and returns the reranked
+chunks (or full sections, with `expand`). It calls `POST /api/search` under the hood, so the
+agent gets the same hybrid + cross-encoder quality the UI does.
 
 ## Retrieval evaluation
 
