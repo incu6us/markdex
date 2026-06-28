@@ -54,8 +54,14 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       runs)** — that 22-query set already has **100% Hit@10**, so recall is saturated and the
       final order is set by the reranker (which scores the raw document). The benefit is a
       recall/disambiguation lever; it shows up on larger/noisier corpora, not one the system
-      already nails. Next lever to convert this into a ranking gain: make the **reranker**
-      breadcrumb-aware (reconstruct from stored `heading_path` metadata at rerank time).
+      already nails.
+      **Reranker breadcrumb-awareness (done):** search now reranks the same contextual text
+      (`domain.ContextualText` rebuilt from the candidate's `heading_path`) instead of the raw
+      document, while the returned hit keeps raw content. *Measured on the 22-query set:* MRR
+      **0.898 → 0.909**, Hit@1 **82% → 86%** (e.g. "when to panic" 2→1), with Hit@3 91% (one
+      query, "acceptance test", slid 2→4 as its breadcrumb adds a diluting middle segment).
+      Tellingly, the breadcrumb-embedded and raw-embedded collections now score **identically** —
+      confirming the reranker, not the retrieval embedding, sets the final order.
 - [x] **Token-accurate chunk sizing** — the embedder exposes `POST /tokenize` (real BGE-M3
       tokenizer); ingest counts each chunk's *embedded* (contextual) text and re-splits any chunk
       over `embedderMaxTokens` (8192, = the model window) into rune windows that fit, verified

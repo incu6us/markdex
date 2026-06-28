@@ -58,6 +58,35 @@ func TestSearchServiceReranksCandidates(t *testing.T) {
 	}
 }
 
+func TestSearchServiceRerankSeesBreadcrumb(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	repo.searchHits = []domain.SearchHit{
+		{ID: "a", Document: "wrap with %w", Metadata: map[string]string{"heading_path": "guide/error-handling/placement-of-w"}},
+	}
+	var gotDocs []string
+	reranker := &fakeReranker{rerank: func(_ string, documents []string, _ int) ([]domain.Ranked, error) {
+		gotDocs = documents
+		return []domain.Ranked{{Index: 0, Score: 0.9}}, nil
+	}}
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
+
+	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, false)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	// The reranker scores the breadcrumb + content so it can disambiguate near sections.
+	want := "guide > error handling > placement of w\n\nwrap with %w"
+	if len(gotDocs) != 1 || gotDocs[0] != want {
+		t.Fatalf("reranker documents = %#v, want %q", gotDocs, want)
+	}
+	// The returned hit keeps the raw content (clean results + expand unaffected).
+	if hits[0].Document != "wrap with %w" {
+		t.Fatalf("returned document = %q, want raw content", hits[0].Document)
+	}
+}
+
 func TestSearchServiceExpandsToSection(t *testing.T) {
 	t.Parallel()
 

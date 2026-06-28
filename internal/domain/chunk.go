@@ -67,11 +67,18 @@ func (c Chunk) Content() string { return c.content }
 // encodes where the chunk sits in the document and the reranker can separate
 // near-identical sections. The stored document keeps Content() only.
 func (c Chunk) ContextualText() string {
-	breadcrumb := humanizeHeadingPath(c.headingPath)
+	return ContextualText(c.headingPath, c.content)
+}
+
+// ContextualText prefixes content with a human-readable breadcrumb of headingPath,
+// or returns content unchanged when there is no heading path. Shared by ingest
+// (what gets embedded) and search (what gets reranked) so both see the same text.
+func ContextualText(headingPath, content string) string {
+	breadcrumb := humanizeHeadingPath(headingPath)
 	if breadcrumb == "" {
-		return c.content
+		return content
 	}
-	return breadcrumb + "\n\n" + c.content
+	return breadcrumb + "\n\n" + content
 }
 
 // humanizeHeadingPath turns a slug heading path ("a/b-c/d") into a readable

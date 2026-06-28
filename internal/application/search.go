@@ -60,9 +60,12 @@ func (s *SearchService) Search(ctx context.Context, query string, topK int, filt
 		return nil, nil
 	}
 
+	// Rerank against the same contextual text (heading-path breadcrumb + content)
+	// that was embedded, so the cross-encoder can separate near-identical sections.
+	// The returned hit keeps its raw Document.
 	documents := make([]string, len(candidates))
 	for i, candidate := range candidates {
-		documents[i] = candidate.Document
+		documents[i] = domain.ContextualText(candidate.Metadata["heading_path"], candidate.Document)
 	}
 
 	ranked, err := s.reranker.Rerank(ctx, query, documents, topK)
