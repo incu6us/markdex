@@ -12,3 +12,7 @@
 
 # local Claude Code settings
 .claude/settings.local.json
+
+# python bytecode
+__pycache__/
+*.pyc
