@@ -14,7 +14,9 @@ The fastest path is Docker — it brings up the app **and** Qdrant with no nativ
 
 ```sh
 make docker-up      # build the app image + start app and Qdrant → http://localhost:4334
-make docker-down    # stop (add ARGS=-v to also drop the data volumes)
+make docker-logs    # follow app + Qdrant logs
+make docker-stop    # stop containers (keep them + volumes)
+make docker-down    # stop and remove (add ARGS=-v to also drop the data volumes)
 ```
 
 Or run it natively (requires the ONNX Runtime native library):
@@ -67,6 +69,8 @@ the web UI — is baked in.
 
 ```sh
 make docker-up      # http://localhost:4334
+make docker-stop    # stop containers, keep them and the volumes
+make docker-down    # stop and remove containers/network (ARGS=-v also drops volumes)
 ```
 
 - **App image** — a 3-stage build: build the UI (Node) → build the Go binary with the UI
