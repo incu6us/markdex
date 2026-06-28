@@ -391,6 +391,76 @@ func TestHandleJobStream(t *testing.T) {
 	}
 }
 
+type mapSearcher struct {
+	byQuery map[string][]domain.SearchHit
+}
+
+func (m mapSearcher) Search(_ context.Context, _, query string, _ int, _ domain.Filter) ([]domain.SearchHit, error) {
+	return m.byQuery[query], nil
+}
+
+func hit(headingPath string) domain.SearchHit {
+	return domain.SearchHit{Metadata: map[string]string{"heading_path": headingPath}}
+}
+
+func TestHandleEval(t *testing.T) {
+	t.Parallel()
+
+	searcher := mapSearcher{byQuery: map[string][]domain.SearchHit{
+		"interfaces": {hit("go/slices"), hit("go/interfaces")}, // relevant at rank 2
+		"missing":    {hit("go/slices"), hit("go/errors")},     // no relevant
+	}}
+	handler := newTestServer(t, testDeps{searcher: searcher})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/eval", map[string]any{
+		"collection": "c", "top_k": 5,
+		"queries": []map[string]any{
+			{"query": "interfaces", "relevant_heading_contains": []string{"interfaces"}},
+			{"query": "missing", "relevant_heading_contains": []string{"interfaces"}},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+
+	resp := decodeBody[struct {
+		TopK    int `json:"top_k"`
+		Metrics struct {
+			Queries int     `json:"queries"`
+			MRR     float64 `json:"mrr"`
+			HitAt1  float64 `json:"hit_at_1"`
+			HitAtK  float64 `json:"hit_at_k"`
+		} `json:"metrics"`
+		Results []struct {
+			Query string `json:"query"`
+			Rank  int    `json:"rank"`
+		} `json:"results"`
+	}](t, rec)
+
+	if resp.Metrics.Queries != 2 {
+		t.Fatalf("queries = %d", resp.Metrics.Queries)
+	}
+	if resp.Metrics.HitAt1 != 0 || resp.Metrics.HitAtK != 0.5 {
+		t.Fatalf("hit@1=%v hit@k=%v, want 0 / 0.5", resp.Metrics.HitAt1, resp.Metrics.HitAtK)
+	}
+	if resp.Metrics.MRR != 0.25 { // (1/2 + 0)/2
+		t.Fatalf("MRR = %v, want 0.25", resp.Metrics.MRR)
+	}
+	if len(resp.Results) != 2 || resp.Results[0].Rank != 2 || resp.Results[1].Rank != 0 {
+		t.Fatalf("results = %+v", resp.Results)
+	}
+}
+
+func TestHandleEvalValidation(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{searcher: mapSearcher{}})
+	rec := doRequest(t, handler, http.MethodPost, "/api/eval", map[string]any{"collection": "c"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (no queries)", rec.Code)
+	}
+}
+
 func waitForJob(t *testing.T, handler http.Handler, id string) httpapi.Job {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

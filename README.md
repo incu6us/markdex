@@ -194,6 +194,7 @@ Endpoints:
 | `POST /api/collections` | Create a collection sized for the embedding model. |
 | `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }`. |
 | `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. |
+| `POST /api/eval` | Score a golden set against search → `{ metrics: { mrr, hit_at_1/3/k }, results }`. |
 | `GET /api/jobs/{id}` | Job state (`pending`/`running`/`succeeded`/`failed`, progress, count). |
 | `GET /api/jobs/{id}/stream` | Server-Sent Events stream of the same job state. |
 
@@ -293,10 +294,10 @@ go vet ./...
 
 ## Retrieval evaluation
 
-`cmd/eval` measures retrieval quality against a golden query set: it posts each query to a
-running `/api/search`, checks whether the expected section is retrieved and how highly it
-ranks, and reports **MRR / Hit@1 / Hit@3 / Hit@k**. Use it to catch regressions and compare
-configs (reranker model, `-pool`, etc.).
+Scoring lives server-side in **`POST /api/eval`** (one source of truth): given a golden set it
+runs each query through search and reports **MRR / Hit@1 / Hit@3 / Hit@k**. Both `cmd/eval`
+and the UI's **Eval** tab are thin clients of that endpoint. Use it to catch regressions and
+compare configs (reranker model, `-pool`, etc.).
 
 ```sh
 make eval-seed   # ingest the vendored fixture into the collection, then eval (from empty)

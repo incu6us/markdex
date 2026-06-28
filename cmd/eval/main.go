@@ -1,11 +1,8 @@
-// Command eval measures retrieval quality against a golden query set.
-//
-// It posts each golden query to a running markdex /api/search, checks whether the
-// expected section (by heading_path substring) is retrieved and how highly it ranks,
-// and reports Hit@1 / Hit@3 / Hit@k / MRR. Use it to detect regressions and to compare
-// configurations (reranker model, pool size, etc.).
+// Command eval measures retrieval quality against a golden query set by calling markdex's
+// POST /api/eval (the server runs the searches and scores them — one source of truth).
 //
 //	go run ./cmd/eval -golden cmd/eval/golden/go-style-guide.json
+//	go run ./cmd/eval -seed   cmd/eval/golden/go-style-guide.md   # ingest first, then eval
 package main
 
 import (
@@ -31,15 +28,24 @@ type goldenSet struct {
 	Queries    []goldenQuery `json:"queries"`
 }
 
-type searchRequest struct {
-	Collection string `json:"collection"`
-	Query      string `json:"query"`
-	TopK       int    `json:"top_k"`
+type evalRequest struct {
+	Collection string        `json:"collection"`
+	TopK       int           `json:"top_k"`
+	Queries    []goldenQuery `json:"queries"`
 }
 
-type searchResponse struct {
+type evalResponse struct {
+	TopK    int `json:"top_k"`
+	Metrics struct {
+		Queries int     `json:"queries"`
+		MRR     float64 `json:"mrr"`
+		HitAt1  float64 `json:"hit_at_1"`
+		HitAt3  float64 `json:"hit_at_3"`
+		HitAtK  float64 `json:"hit_at_k"`
+	} `json:"metrics"`
 	Results []struct {
-		Metadata map[string]string `json:"metadata"`
+		Query string `json:"query"`
+		Rank  int    `json:"rank"`
 	} `json:"results"`
 }
 
@@ -59,15 +65,12 @@ func main() {
 	if *topK > 0 {
 		k = *topK
 	}
-	if k < 1 {
-		k = 10
-	}
 	collection := set.Collection
 	if *collectionFlag != "" {
 		collection = *collectionFlag
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Minute}
 
 	if *seedFile != "" {
 		if err := seed(client, *addr, collection, *seedFile); err != nil {
@@ -75,27 +78,23 @@ func main() {
 		}
 	}
 
-	fmt.Printf("eval %q over %q (top_k=%d, %d queries)\n\n", *goldenPath, collection, k, len(set.Queries))
-
-	ranks := make([]int, 0, len(set.Queries))
-	for _, q := range set.Queries {
-		paths, err := search(client, *addr, collection, q.Query, k)
-		if err != nil {
-			log.Fatalf("search %q: %v", q.Query, err)
-		}
-		rank := firstRelevantRank(paths, q.RelevantHeadingContains)
-		ranks = append(ranks, rank)
-
-		marker := fmt.Sprintf("rank %d", rank)
-		if rank == 0 {
-			marker = "MISS"
-		}
-		fmt.Printf("  [%-7s] %s\n", marker, q.Query)
+	var report evalResponse
+	if err := postJSON(client, *addr+"/api/eval",
+		evalRequest{Collection: collection, TopK: k, Queries: set.Queries}, &report); err != nil {
+		log.Fatalf("eval: %v", err)
 	}
 
-	m := aggregate(ranks, k)
+	fmt.Printf("eval %q over %q (top_k=%d, %d queries)\n\n", *goldenPath, collection, report.TopK, report.Metrics.Queries)
+	for _, res := range report.Results {
+		marker := fmt.Sprintf("rank %d", res.Rank)
+		if res.Rank == 0 {
+			marker = "MISS"
+		}
+		fmt.Printf("  [%-7s] %s\n", marker, res.Query)
+	}
+	m := report.Metrics
 	fmt.Printf("\n%-8s %.3f\n%-8s %.3f\n%-8s %.3f\n%-8s %.3f\n",
-		"MRR", m.MRR, "Hit@1", m.HitAt1, "Hit@3", m.HitAt3, fmt.Sprintf("Hit@%d", k), m.HitAtK)
+		"MRR", m.MRR, "Hit@1", m.HitAt1, "Hit@3", m.HitAt3, fmt.Sprintf("Hit@%d", report.TopK), m.HitAtK)
 }
 
 func loadGolden(path string) (goldenSet, error) {
@@ -110,14 +109,13 @@ func loadGolden(path string) (goldenSet, error) {
 	return set, nil
 }
 
-// seed ingests a markdown file into the collection (creating it if needed) and waits for
-// the ingest job to finish, so the eval is reproducible from an empty Qdrant.
+// seed ingests a markdown file into the collection (creating it if needed) and waits for the
+// ingest job to finish, so the eval is reproducible from an empty Qdrant.
 func seed(client *http.Client, addr, collection, mdPath string) error {
 	content, err := os.ReadFile(mdPath)
 	if err != nil {
 		return err
 	}
-
 	if err := postJSON(client, addr+"/api/collections", map[string]any{"name": collection}, nil); err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
@@ -186,30 +184,4 @@ func getJSON(client *http.Client, url string, out any) error {
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-func search(client *http.Client, addr, collection, query string, k int) ([]string, error) {
-	payload, err := json.Marshal(searchRequest{Collection: collection, Query: query, TopK: k})
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := client.Post(addr+"/api/search", "application/json", bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	var out searchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	paths := make([]string, len(out.Results))
-	for i, r := range out.Results {
-		paths[i] = r.Metadata["heading_path"]
-	}
-	return paths, nil
 }

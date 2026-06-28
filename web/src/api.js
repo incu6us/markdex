@@ -43,3 +43,11 @@ export function search(payload) {
     body: JSON.stringify(payload),
   })
 }
+
+export function evaluate(payload) {
+  return jsonFetch('/api/eval', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}

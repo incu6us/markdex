@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { search } from './api.js'
+import { evaluate } from './api.js'
 
 const DEFAULT_GOLDEN = `{
   "top_k": 10,
@@ -13,45 +13,16 @@ const DEFAULT_GOLDEN = `{
   ]
 }`
 
-function isRelevant(headingPath, contains) {
-  const hp = (headingPath || '').toLowerCase()
-  return (contains || []).some((w) => w && hp.includes(w.toLowerCase()))
-}
-
-function firstRelevantRank(paths, contains) {
-  for (let i = 0; i < paths.length; i++) {
-    if (isRelevant(paths[i], contains)) return i + 1
-  }
-  return 0
-}
-
-function aggregate(ranks, k) {
-  const n = ranks.length || 1
-  let hit1 = 0, hit3 = 0, hitK = 0, rr = 0
-  for (const r of ranks) {
-    if (!r) continue
-    rr += 1 / r
-    if (r === 1) hit1++
-    if (r <= 3) hit3++
-    if (r <= k) hitK++
-  }
-  return { mrr: rr / n, hit1: hit1 / n, hit3: hit3 / n, hitK: hitK / n }
-}
-
 export default function Eval({ collections }) {
   const [collection, setCollection] = useState('')
   const [golden, setGolden] = useState(DEFAULT_GOLDEN)
-  const [rows, setRows] = useState(null)
-  const [metrics, setMetrics] = useState(null)
-  const [k, setK] = useState(10)
-  const [progress, setProgress] = useState('')
+  const [report, setReport] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function onRun() {
     setError('')
-    setRows(null)
-    setMetrics(null)
+    setReport(null)
     if (!collection) {
       setError('Pick a collection.')
       return
@@ -64,35 +35,23 @@ export default function Eval({ collections }) {
       setError(`Golden set is not valid JSON: ${err.message}`)
       return
     }
-    const queries = set.queries || []
-    const topK = set.top_k || 10
-    setK(topK)
-    if (queries.length === 0) {
+    if (!set.queries || set.queries.length === 0) {
       setError('Golden set has no queries.')
       return
     }
 
     setBusy(true)
-    const ranks = []
-    const perQuery = []
     try {
-      for (let i = 0; i < queries.length; i++) {
-        setProgress(`${i + 1}/${queries.length}`)
-        const data = await search({ collection, query: queries[i].query, top_k: topK })
-        const paths = (data.results || []).map((r) => r.metadata?.heading_path || '')
-        const rank = firstRelevantRank(paths, queries[i].relevant_heading_contains)
-        ranks.push(rank)
-        perQuery.push({ query: queries[i].query, rank })
-      }
-      setRows(perQuery)
-      setMetrics(aggregate(ranks, topK))
+      const data = await evaluate({ collection, top_k: set.top_k || 10, queries: set.queries })
+      setReport(data)
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
-      setProgress('')
     }
   }
+
+  const m = report?.metrics
 
   return (
     <>
@@ -101,9 +60,9 @@ export default function Eval({ collections }) {
       <section className="card">
         <h2>Evaluate retrieval</h2>
         <p className="hint">
-          Runs each golden query against <code>/api/search</code> and scores how highly the
-          expected section ranks. A result is relevant if its <code>heading_path</code>
-          contains one of <code>relevant_heading_contains</code>.
+          Posts the golden set to <code>/api/eval</code>, which runs each query through search
+          and scores how highly the expected section ranks. A result is relevant if its{' '}
+          <code>heading_path</code> contains one of <code>relevant_heading_contains</code>.
         </p>
 
         <div className="field">
@@ -128,22 +87,22 @@ export default function Eval({ collections }) {
         </div>
 
         <button className="primary" onClick={onRun} disabled={busy}>
-          {busy ? `Running ${progress}…` : 'Run eval'}
+          {busy ? 'Running…' : 'Run eval'}
         </button>
       </section>
 
-      {metrics && (
+      {report && (
         <section className="card">
           <h2>Results</h2>
           <div className="metrics">
-            <div className="metric"><span className="metric-value">{metrics.mrr.toFixed(3)}</span><span className="metric-label">MRR</span></div>
-            <div className="metric"><span className="metric-value">{(metrics.hit1 * 100).toFixed(0)}%</span><span className="metric-label">Hit@1</span></div>
-            <div className="metric"><span className="metric-value">{(metrics.hit3 * 100).toFixed(0)}%</span><span className="metric-label">Hit@3</span></div>
-            <div className="metric"><span className="metric-value">{(metrics.hitK * 100).toFixed(0)}%</span><span className="metric-label">Hit@{k}</span></div>
+            <div className="metric"><span className="metric-value">{m.mrr.toFixed(3)}</span><span className="metric-label">MRR</span></div>
+            <div className="metric"><span className="metric-value">{(m.hit_at_1 * 100).toFixed(0)}%</span><span className="metric-label">Hit@1</span></div>
+            <div className="metric"><span className="metric-value">{(m.hit_at_3 * 100).toFixed(0)}%</span><span className="metric-label">Hit@3</span></div>
+            <div className="metric"><span className="metric-value">{(m.hit_at_k * 100).toFixed(0)}%</span><span className="metric-label">Hit@{report.top_k}</span></div>
           </div>
 
           <ul className="topics">
-            {rows.map((row, i) => (
+            {report.results.map((row, i) => (
               <li key={i}>
                 <span className="topic-title">{row.query}</span>
                 <span className={`topic-meta ${row.rank === 0 ? 'miss' : ''}`}>

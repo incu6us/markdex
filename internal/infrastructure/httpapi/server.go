@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/collections", s.handleCreateCollection)
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)
 	mux.HandleFunc("POST /api/search", s.handleSearch)
+	mux.HandleFunc("POST /api/eval", s.handleEval)
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
 	mux.HandleFunc("GET /api/jobs/{id}/stream", s.handleJobStream)
 	if s.ui != nil {
