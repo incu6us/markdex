@@ -297,19 +297,61 @@ go vet ./...
 Scoring lives server-side in **`POST /api/eval`** (one source of truth): given a golden set it
 runs each query through search and reports **MRR / Hit@1 / Hit@3 / Hit@k**. Both `cmd/eval`
 and the UI's **Eval** tab are thin clients of that endpoint. Use it to catch regressions and
-compare configs (reranker model, `-pool`, etc.).
+compare configs (reranker model, `-pool`, chunking, embedder…).
 
-```sh
-make eval-seed   # ingest the vendored fixture into the collection, then eval (from empty)
-make eval        # eval an already-ingested collection
-make eval GOLDEN=path.json   # custom golden set
+**What the metrics mean:** *Hit@k* — was the right section in the top `k` the LLM gets to
+see? *MRR* — how highly did it rank (higher = best chunk first, less noise)?
+
+### Three ways to run it
+
+- **UI** — open `http://localhost:4334` → **Eval** tab: pick a collection, edit the golden-set
+  JSON, **Run eval**. Best for poking around and seeing which queries miss.
+- **CLI**:
+  ```sh
+  make eval-seed   # ingest the vendored fixture into the collection, then eval (from empty)
+  make eval        # eval an already-ingested collection
+  make eval GOLDEN=cmd/eval/golden/my-set.json   # a custom golden set
+  go run ./cmd/eval -golden my-set.json -collection my-collection   # full control
+  ```
+  `eval-seed` makes the bundled eval reproducible from an empty Qdrant — it ingests the
+  **pinned** `cmd/eval/golden/go-style-guide.md` (a vendored copy of Google's Go style guide,
+  Apache-2.0) first.
+- **API** — `POST /api/eval` with `{ collection, top_k, queries }` for CI or any harness.
+
+### Golden set format
+
+```json
+{ "collection": "go-style-guide", "top_k": 10,
+  "queries": [ { "query": "how do I wrap errors", "relevant_heading_contains": ["error-handling"] } ] }
 ```
 
-`eval-seed` makes the harness reproducible from an empty Qdrant: it ingests the **pinned**
-`cmd/eval/golden/go-style-guide.md` (a vendored copy of Google's Go style guide, Apache-2.0)
-into the collection first. A golden set is JSON:
-`{ collection, top_k, queries: [{ query, relevant_heading_contains }] }` — a result counts as
-relevant if its `heading_path` contains one of the substrings.
+A result counts as **relevant** if its `heading_path` contains any of the substrings. Tips:
+one concept per query, aim each at a distinct section, and mix obvious queries with
+**paraphrases that avoid the section keyword** (those discriminate real retrieval quality from
+keyword matching).
+
+### Evaluating a brand-new collection
+
+1. **Ingest** your docs (UI **Ingest** tab, or `POST /api/ingest`) into a new collection, e.g.
+   `my-docs`.
+2. **Discover the section slugs** to label against — they're the `heading_path` values:
+   ```sh
+   curl -s -X POST http://localhost:4334/api/search \
+     -H 'Content-Type: application/json' \
+     -d '{"collection":"my-docs","query":"overview","top_k":20}' \
+     | jq -r '.results[].metadata.heading_path'
+   ```
+3. **Write a golden set** `my-docs.json` with `collection: "my-docs"` and ~10–20 queries, each
+   with a `relevant_heading_contains` substring drawn from those slugs.
+4. **Run it:** `make eval GOLDEN=my-docs.json` (or the UI Eval tab) → record the baseline.
+5. **Tune & compare:** change a knob and re-run. Example — is the heavy reranker worth it?
+   ```sh
+   make eval GOLDEN=my-docs.json                 # baseline (MiniLM)
+   # edit docker-compose.yml → RERANK_MODEL: BAAI/bge-reranker-v2-m3
+   docker compose up -d                          # reload the embedder
+   make eval GOLDEN=my-docs.json                 # compare MRR / Hit@1 (and the latency)
+   ```
+   Keep the change only if the numbers improve.
 
 ## Roadmap
 
