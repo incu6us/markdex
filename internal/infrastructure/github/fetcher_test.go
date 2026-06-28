@@ -69,6 +69,39 @@ func TestFetcherGet(t *testing.T) {
 	}
 }
 
+func TestFetchWithTokenUsesContentsAPI(t *testing.T) {
+	t.Parallel()
+
+	var gotPath, gotQuery, gotAuth, gotAccept string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		gotAuth, gotAccept = r.Header.Get("Authorization"), r.Header.Get("Accept")
+		_, _ = w.Write([]byte("# Private\nsecret body"))
+	}))
+	t.Cleanup(server.Close)
+
+	f := NewFetcher()
+	f.token = "s3cret"
+	f.apiBase = server.URL
+
+	content, err := f.Fetch(context.Background(), "https://raw.githubusercontent.com/o/r/main/docs/a.md")
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if content != "# Private\nsecret body" {
+		t.Fatalf("content = %q", content)
+	}
+	if gotPath != "/repos/o/r/contents/docs/a.md" || gotQuery != "ref=main" {
+		t.Fatalf("contents request = %s?%s", gotPath, gotQuery)
+	}
+	if gotAuth != "Bearer s3cret" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotAccept != "application/vnd.github.raw" {
+		t.Fatalf("Accept = %q", gotAccept)
+	}
+}
+
 func TestFetcherGetNon200(t *testing.T) {
 	t.Parallel()
 

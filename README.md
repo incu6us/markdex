@@ -216,7 +216,9 @@ A request `source` is one of:
   (a `github.com/.../blob/...` URL is accepted and rewritten to raw)
 - `{ "type": "github_repo", "url": "https://github.com/owner/repo" }` — ingests **every `.md`**
   in the repo (or a `…/tree/<branch>/<subpath>`, or the shorthand `owner/repo`) as one job.
-  Set `GITHUB_TOKEN` to raise GitHub's 60/hr unauthenticated limit and to reach private repos.
+  Set `GITHUB_TOKEN` to raise GitHub's 60/hr unauthenticated limit and to reach **private repos**
+  — with a token, files are pulled through the authenticated contents API
+  (`/repos/{o}/{r}/contents/{path}`) instead of `raw.githubusercontent.com`.
 - `{ "type": "upload_dir", "files": [{ "name", "content" }, …] }` — ingests **a local folder**
   in one job. The UI's **Local folder** tab reads every `.md` in a picked folder client-side
   (no server-side path / volume mount needed); empty files are skipped.

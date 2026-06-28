@@ -86,6 +86,10 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       **Local folder** ingestion too: the `upload_dir` source carries `[{name, content}]` and the
       UI's **Local folder** tab reads every `.md` in a picked folder client-side
       (`webkitdirectory`) — no volume mount needed, empty files skipped. Verified e2e.
+      **Private repos** are supported: with `GITHUB_TOKEN` set, the lister authenticates the API
+      and the fetcher pulls each file through the authenticated contents API
+      (`Accept: application/vnd.github.raw`) rather than `raw.githubusercontent.com`. Verified the
+      authenticated fetch path e2e (token-set ingest of a public repo via the contents API).
 - [ ] **Scheduled / incremental re-sync** — refresh sources on a schedule, not just manually.
 - [ ] **Collection reconciliation** — remove points for source docs that no longer exist
       (delete-by-source only handles re-ingested docs; vanished ones leave orphans).
