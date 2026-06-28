@@ -34,8 +34,8 @@ preview the H1-topic split, and ingest into a new or existing collection.
                        │  cross-encoder rerank│  │  RRF fusion              │
                        └──────────────────────┘  └──────────────────────────┘
 
-  ingest:  load → split (H1→H2→…→window) → embed(document) → upsert dense+sparse
-  search:  embed(query) → hybrid ANN (dense+sparse, RRF) top-N → rerank → top-k
+  ingest:  load → split (H1→H2→…→window) → dedup + token-budget → embed(breadcrumb+chunk) → upsert dense+sparse
+  search:  embed(query) → hybrid ANN (dense+sparse, RRF) top-N → rerank → top-k (+ optional expand)
 ```
 
 ## Quick start
@@ -230,8 +230,10 @@ the Go backend from the same origin (`make run`, or `make ui-build` + `go run .`
 reload during development, run `cd web && npm run dev` (Vite on `:5173`, proxying `/api` to
 `:4334`).
 
-Flow: pick a source (upload or GitHub URL) → preview the H1 topics → choose a new or
-existing collection → ingest with a live progress bar.
+Four tabs: **Ingest** (pick a source → preview the H1 topics → choose a collection → ingest
+with a live progress bar), **Search** (hybrid + reranked results, optional `expand` to the full
+section), **Collections** (create / delete), and **Eval** (run a golden set → MRR / Hit@k). The
+selected collection and active tab persist across tabs and reloads.
 
 ## Verify
 
@@ -261,21 +263,23 @@ Ports & adapters — the domain and application layers depend only on interfaces
 main.go                                       composition root (HTTP API server)
 
 internal/domain/                              the model + ubiquitous language
-  document.go / chunk.go                      Document, Chunk value objects
+  document.go / chunk.go                      Document, Chunk value objects (Chunk.ContextualText breadcrumb)
   embedding.go / sparse_embedding.go          Embedding, SparseEmbedding; Vectors = {Dense, Sparse}
   embedded_chunk.go / search.go               EmbeddedChunk; CollectionSchema, Filter, SearchHit
-  ports.go / rerank.go / embed_kind.go        DocumentSource / Chunker / Embedder / Reranker / VectorRepository
+  dedup.go                                    near-duplicate chunk detection (word-shingle Jaccard)
+  ports.go / rerank.go / embed_kind.go        DocumentSource / Chunker / Embedder / Reranker / TokenCounter / VectorRepository
 
 internal/application/
-  ingest.go                                   IngestService (Prepare → Load → Split → Embed → Replace)
-  search.go                                   SearchService (embed query → hybrid search → rerank)
+  ingest.go                                   IngestService (Load → Split → dedup + token-budget → contextual embed → Replace)
+  search.go                                   SearchService (embed query → hybrid search → rerank → optional expand)
 
 internal/infrastructure/
   github/fetcher.go                           fetches raw .md from GitHub (blob → raw)
   markdown/splitter.go                        Chunker: recursive, code-fence-aware H1 splitter
-  embedderclient/                             HTTP client to the embedder sidecar (Embedder + Reranker)
-  qdrant/repository.go                        VectorRepository: hybrid Prepare/Replace/Search/List
-  httpapi/                                    HTTP server: preview / collections / ingest / search / jobs (+ SSE)
+  embedderclient/                             HTTP client to the embedder sidecar (Embedder + Reranker + TokenCounter)
+  markdexclient/                              REST client to markdex's own API (used by cmd/mcp)
+  qdrant/repository.go                        VectorRepository: hybrid Prepare/Replace/Search/List/Delete/Section
+  httpapi/                                    HTTP server: preview / collections / ingest / search / eval / jobs (+ SSE)
 
 cmd/eval/                                     retrieval eval harness (golden set → MRR / Hit@k)
 cmd/mcp/                                       MCP (stdio) server: search + discovery tools (official go-sdk)
@@ -293,10 +297,12 @@ internal/domain/*_test.go                     value objects (Document, Chunk, Sp
 internal/application/                         IngestService + SearchService (fakes for every port)
 internal/infrastructure/markdown/             splitter behaviour (H1, recursion, fences, windows)
 internal/infrastructure/github/               URL normalization + fetch (httptest)
-internal/infrastructure/embedderclient/       sidecar contract: embed / rerank / info (httptest)
-internal/infrastructure/qdrant/               hybrid wire contract: prepare/replace/search/list (httptest)
+internal/infrastructure/embedderclient/       sidecar contract: embed / rerank / tokenize / info (httptest)
+internal/infrastructure/markdexclient/        markdex REST client used by the MCP server (httptest)
+internal/infrastructure/qdrant/               hybrid wire contract: prepare/replace/search/list/delete (httptest)
 internal/infrastructure/httpapi/              handlers + async job lifecycle (httptest)
 cmd/eval/                                     eval scoring metrics (MRR / Hit@k)
+cmd/mcp/                                       MCP dispatch + tools + in-memory-transport e2e
 ```
 
 ```sh
