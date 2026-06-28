@@ -101,6 +101,7 @@ h1 {
 }
 
 input[type='text'],
+input[type='number'],
 select {
   width: 100%;
   background: var(--bg);
@@ -296,6 +297,7 @@ input.topk {
   color: var(--muted);
   font-size: 0.8rem;
   margin: 0.15rem 0 0.4rem;
+  overflow-wrap: anywhere;
 }
 
 .result-doc {
@@ -394,6 +396,9 @@ textarea.golden {
   font-size: 0.78rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .chip:hover {
@@ -409,4 +414,59 @@ textarea.golden {
   color: var(--muted);
   font-size: 0.85rem;
   cursor: pointer;
+}
+
+/* --- Mobile (phones / narrow viewports) --- */
+@media (max-width: 560px) {
+  .app {
+    padding: 1.25rem 0.9rem 3rem;
+  }
+
+  h1 {
+    font-size: 1.4rem;
+  }
+
+  /* Tabs wrap and share the row instead of overflowing. */
+  .nav {
+    flex-wrap: wrap;
+  }
+
+  .nav button {
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 0.55rem 0.6rem;
+  }
+
+  /* 16px keeps iOS Safari from auto-zooming when a field is focused. */
+  input[type='text'],
+  input[type='number'],
+  select,
+  textarea.golden {
+    font-size: 16px;
+    padding: 0.65rem 0.7rem;
+  }
+
+  /* Inline input+button rows stack: the field takes the first line, the
+     controls wrap to the next and stretch to a comfortable tap size. */
+  .field.row {
+    flex-wrap: wrap;
+  }
+
+  .field.row > button {
+    flex: 1 1 auto;
+    padding: 0.65rem 1rem;
+  }
+
+  /* Eval metrics: 2x2 instead of a cramped single row of four. */
+  .metrics {
+    flex-wrap: wrap;
+  }
+
+  .metric {
+    flex: 1 1 40%;
+  }
+
+  .metric-value {
+    font-size: 1.35rem;
+  }
 }
