@@ -7,7 +7,7 @@ GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 BIN ?= bin/markdex-$(GOOS)-$(GOARCH)
 
-.PHONY: run-qdrant ui-build run build test docker-up docker-stop docker-down docker-logs
+.PHONY: run-qdrant ui-build run build test docker-build docker-up docker-stop docker-down docker-logs
 
 ## run-qdrant: start a local Qdrant instance
 run-qdrant:
@@ -29,6 +29,10 @@ build: ui-build
 ## test: run the Go test suite
 test:
 	go test ./...
+
+## docker-build: rebuild the app image (picks up code changes)
+docker-build:
+	docker compose build app
 
 ## docker-up: build and start the full stack (app + qdrant) in the background
 docker-up:
