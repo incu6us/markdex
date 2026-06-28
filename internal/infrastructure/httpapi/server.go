@@ -23,32 +23,39 @@ type Fetcher interface {
 	Fetch(ctx context.Context, url string) (string, error)
 }
 
+// RepoLister lists the raw URLs of every Markdown file in a GitHub repo/path.
+type RepoLister interface {
+	ListMarkdown(ctx context.Context, repoURL string) ([]string, error)
+}
+
 type Config struct {
-	Chunker  domain.Chunker
-	Fetcher  Fetcher
-	Lister   CollectionLister
-	Creator  CollectionCreator
-	Deleter  CollectionDeleter
-	Headings HeadingsProvider
-	Searcher Searcher
-	Jobs     *JobManager
-	Model    ModelInfo
-	UI       fs.FS
-	Logger   *slog.Logger
+	Chunker    domain.Chunker
+	Fetcher    Fetcher
+	RepoLister RepoLister
+	Lister     CollectionLister
+	Creator    CollectionCreator
+	Deleter    CollectionDeleter
+	Headings   HeadingsProvider
+	Searcher   Searcher
+	Jobs       *JobManager
+	Model      ModelInfo
+	UI         fs.FS
+	Logger     *slog.Logger
 }
 
 type Server struct {
-	chunker  domain.Chunker
-	fetcher  Fetcher
-	lister   CollectionLister
-	creator  CollectionCreator
-	deleter  CollectionDeleter
-	headings HeadingsProvider
-	searcher Searcher
-	jobs     *JobManager
-	model    ModelInfo
-	ui       fs.FS
-	logger   *slog.Logger
+	chunker    domain.Chunker
+	fetcher    Fetcher
+	repoLister RepoLister
+	lister     CollectionLister
+	creator    CollectionCreator
+	deleter    CollectionDeleter
+	headings   HeadingsProvider
+	searcher   Searcher
+	jobs       *JobManager
+	model      ModelInfo
+	ui         fs.FS
+	logger     *slog.Logger
 }
 
 func NewServer(cfg Config) *Server {
@@ -57,17 +64,18 @@ func NewServer(cfg Config) *Server {
 		logger = slog.Default()
 	}
 	return &Server{
-		chunker:  cfg.Chunker,
-		fetcher:  cfg.Fetcher,
-		lister:   cfg.Lister,
-		creator:  cfg.Creator,
-		deleter:  cfg.Deleter,
-		headings: cfg.Headings,
-		searcher: cfg.Searcher,
-		jobs:     cfg.Jobs,
-		model:    cfg.Model,
-		ui:       cfg.UI,
-		logger:   logger,
+		chunker:    cfg.Chunker,
+		fetcher:    cfg.Fetcher,
+		repoLister: cfg.RepoLister,
+		lister:     cfg.Lister,
+		creator:    cfg.Creator,
+		deleter:    cfg.Deleter,
+		headings:   cfg.Headings,
+		searcher:   cfg.Searcher,
+		jobs:       cfg.Jobs,
+		model:      cfg.Model,
+		ui:         cfg.UI,
+		logger:     logger,
 	}
 }
 

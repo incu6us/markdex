@@ -16,6 +16,7 @@ export default function App() {
   const [fileName, setFileName] = useState('')
   const [fileContent, setFileContent] = useState('')
   const [githubUrl, setGithubUrl] = useState('')
+  const [repoUrl, setRepoUrl] = useState('')
 
   const [preview, setPreview] = useState(null)
   const [collections, setCollections] = useState([])
@@ -42,6 +43,9 @@ export default function App() {
   function buildSource() {
     if (sourceType === 'upload') {
       return { type: 'upload', name: fileName, content: fileContent }
+    }
+    if (sourceType === 'github_repo') {
+      return { type: 'github_repo', url: repoUrl.trim() }
     }
     return { type: 'github_raw', url: githubUrl.trim() }
   }
@@ -120,7 +124,14 @@ export default function App() {
     }
   }
 
-  const hasSource = sourceType === 'upload' ? Boolean(fileContent) : Boolean(githubUrl.trim())
+  const hasSource =
+    sourceType === 'upload'
+      ? Boolean(fileContent)
+      : sourceType === 'github_repo'
+        ? Boolean(repoUrl.trim())
+        : Boolean(githubUrl.trim())
+  // Preview reads a single document; a whole repo is ingested directly.
+  const canPreview = sourceType !== 'github_repo'
 
   return (
     <main className="app">
@@ -163,14 +174,18 @@ export default function App() {
           <button className={sourceType === 'github_raw' ? 'active' : ''} onClick={() => setSourceType('github_raw')}>
             GitHub raw URL
           </button>
+          <button className={sourceType === 'github_repo' ? 'active' : ''} onClick={() => setSourceType('github_repo')}>
+            GitHub repo
+          </button>
         </div>
 
-        {sourceType === 'upload' ? (
+        {sourceType === 'upload' && (
           <div className="field">
             <input type="file" accept=".md,text/markdown" onChange={onFileChange} />
             {fileName && <span className="hint">{fileName} · {fileContent.length} chars</span>}
           </div>
-        ) : (
+        )}
+        {sourceType === 'github_raw' && (
           <div className="field">
             <input
               type="text"
@@ -180,10 +195,23 @@ export default function App() {
             />
           </div>
         )}
+        {sourceType === 'github_repo' && (
+          <div className="field">
+            <input
+              type="text"
+              placeholder="https://github.com/owner/repo  (or owner/repo, or …/tree/branch/path)"
+              value={repoUrl}
+              onChange={(e) => setRepoUrl(e.target.value)}
+            />
+            <span className="hint">Ingests every <code>.md</code> in the repo (or subpath). No preview — ingest directly.</span>
+          </div>
+        )}
 
-        <button className="primary" disabled={!hasSource || busy} onClick={onPreview}>
-          Preview topics
-        </button>
+        {canPreview && (
+          <button className="primary" disabled={!hasSource || busy} onClick={onPreview}>
+            Preview topics
+          </button>
+        )}
       </section>
 
       {preview && (

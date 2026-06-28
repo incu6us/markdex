@@ -32,6 +32,9 @@ services:
     environment:
       QDRANT_URL: http://qdrant:6333
       EMBEDDER_URL: http://embedder:8000
+      # Optional: raises GitHub's 60/hr unauthenticated limit and enables private
+      # repos for repo ingestion. Passed through from the host env if set.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     ports:
       - "4334:4334"
 

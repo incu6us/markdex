@@ -61,6 +61,30 @@ func (s *stubDeleter) Delete(_ context.Context, name string) error {
 	return nil
 }
 
+type stubRepoLister struct {
+	urls   []string
+	err    error
+	gotURL string
+}
+
+func (s *stubRepoLister) ListMarkdown(_ context.Context, repoURL string) ([]string, error) {
+	s.gotURL = repoURL
+	return s.urls, s.err
+}
+
+type capturingIngester struct {
+	mu   sync.Mutex
+	spec httpapi.IngestSpec
+}
+
+func (c *capturingIngester) Ingest(_ context.Context, spec httpapi.IngestSpec, report func(int, int)) (int, error) {
+	c.mu.Lock()
+	c.spec = spec
+	c.mu.Unlock()
+	report(len(spec.URLs), len(spec.URLs))
+	return len(spec.URLs), nil
+}
+
 type stubFetcher struct {
 	content string
 	err     error
@@ -105,14 +129,15 @@ func (s stubHeadings) Headings(context.Context, string) ([]string, error) {
 }
 
 type testDeps struct {
-	lister   httpapi.CollectionLister
-	creator  httpapi.CollectionCreator
-	deleter  httpapi.CollectionDeleter
-	fetcher  httpapi.Fetcher
-	ingester httpapi.Ingester
-	searcher httpapi.Searcher
-	headings httpapi.HeadingsProvider
-	model    httpapi.ModelInfo
+	lister     httpapi.CollectionLister
+	creator    httpapi.CollectionCreator
+	deleter    httpapi.CollectionDeleter
+	repoLister httpapi.RepoLister
+	fetcher    httpapi.Fetcher
+	ingester   httpapi.Ingester
+	searcher   httpapi.Searcher
+	headings   httpapi.HeadingsProvider
+	model      httpapi.ModelInfo
 }
 
 func newTestServer(t *testing.T, deps testDeps) http.Handler {
@@ -129,16 +154,17 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 	t.Cleanup(manager.Stop)
 
 	return httpapi.NewServer(httpapi.Config{
-		Chunker:  markdown.NewSplitter(2000, 200),
-		Fetcher:  deps.fetcher,
-		Lister:   deps.lister,
-		Creator:  deps.creator,
-		Deleter:  deps.deleter,
-		Headings: deps.headings,
-		Searcher: deps.searcher,
-		Jobs:     manager,
-		Model:    deps.model,
-		Logger:   logger,
+		Chunker:    markdown.NewSplitter(2000, 200),
+		Fetcher:    deps.fetcher,
+		Lister:     deps.lister,
+		Creator:    deps.creator,
+		Deleter:    deps.deleter,
+		RepoLister: deps.repoLister,
+		Headings:   deps.headings,
+		Searcher:   deps.searcher,
+		Jobs:       manager,
+		Model:      deps.model,
+		Logger:     logger,
 	}).Handler()
 }
 
@@ -382,6 +408,61 @@ func TestHandleIngestRecordsFailure(t *testing.T) {
 	job := waitForJob(t, handler, jobID)
 	if job.State != httpapi.JobFailed || job.Error == "" {
 		t.Fatalf("job = %+v, want failed with error", job)
+	}
+}
+
+func TestHandleIngestGithubRepo(t *testing.T) {
+	t.Parallel()
+
+	urls := []string{"https://raw.example/o/r/main/a.md", "https://raw.example/o/r/main/docs/b.md"}
+	lister := &stubRepoLister{urls: urls}
+	ingester := &capturingIngester{}
+	handler := newTestServer(t, testDeps{repoLister: lister, ingester: ingester})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+		"source":     map[string]any{"type": "github_repo", "url": "https://github.com/o/r"},
+		"collection": "go-guide",
+	})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body)
+	}
+	jobID := decodeBody[struct {
+		JobID string `json:"job_id"`
+	}](t, rec).JobID
+	if job := waitForJob(t, handler, jobID); job.State != httpapi.JobSucceeded {
+		t.Fatalf("job = %+v, want succeeded", job)
+	}
+	if lister.gotURL != "https://github.com/o/r" {
+		t.Fatalf("lister got url %q", lister.gotURL)
+	}
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
+	if len(ingester.spec.URLs) != 2 || ingester.spec.URLs[1] != urls[1] {
+		t.Fatalf("ingester spec URLs = %v", ingester.spec.URLs)
+	}
+}
+
+func TestHandleIngestGithubRepoListError(t *testing.T) {
+	t.Parallel()
+	handler := newTestServer(t, testDeps{repoLister: &stubRepoLister{err: errors.New("repo not found")}})
+	rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+		"source":     map[string]any{"type": "github_repo", "url": "https://github.com/o/missing"},
+		"collection": "go-guide",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestHandleIngestGithubRepoNotConfigured(t *testing.T) {
+	t.Parallel()
+	handler := newTestServer(t, testDeps{}) // no repoLister
+	rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+		"source":     map[string]any{"type": "github_repo", "url": "https://github.com/o/r"},
+		"collection": "go-guide",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
 

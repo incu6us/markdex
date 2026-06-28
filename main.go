@@ -93,23 +93,24 @@ func serveAPI(
 	poolSize int,
 	logger *slog.Logger,
 ) error {
-	ingester := &chunkIngester{embedder: embedder, counter: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
+	ingester := &chunkIngester{embedder: embedder, counter: embedder, fetcher: github.NewFetcher(), logger: logger, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
 	manager := httpapi.NewJobManager(ingester, logger)
 	manager.Start()
 	defer manager.Stop()
 
 	server := httpapi.NewServer(httpapi.Config{
-		Chunker:  markdown.NewSplitter(embedderMaxChars, defaultOverlap),
-		Fetcher:  github.NewFetcher(),
-		Lister:   &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
-		Creator:  &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
-		Deleter:  &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
-		Headings: &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
-		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize, logger: logger},
-		Jobs:     manager,
-		Model:    model,
-		UI:       embeddedUI(logger),
-		Logger:   logger,
+		Chunker:    markdown.NewSplitter(embedderMaxChars, defaultOverlap),
+		Fetcher:    github.NewFetcher(),
+		RepoLister: github.NewRepoLister(),
+		Lister:     &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
+		Creator:    &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Deleter:    &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
+		Headings:   &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
+		Searcher:   &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize, logger: logger},
+		Jobs:       manager,
+		Model:      model,
+		UI:         embeddedUI(logger),
+		Logger:     logger,
 	})
 
 	httpServer := &http.Server{
@@ -152,17 +153,43 @@ func embeddedUI(logger *slog.Logger) fs.FS {
 type chunkIngester struct {
 	embedder  domain.Embedder
 	counter   domain.TokenCounter
+	fetcher   *github.Fetcher
+	logger    *slog.Logger
 	qdrantURL string
 	apiKey    string
 	schema    domain.CollectionSchema
 }
 
-func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, report func(processed, total int)) (int, error) {
-	document, err := domain.NewDocument(spec.Name, spec.Content)
-	if err != nil {
-		return 0, err
-	}
+// repoDocumentSource fetches a set of raw .md URLs and turns each into a Document,
+// skipping (and logging) any that fail so one bad file doesn't abort the whole repo.
+type repoDocumentSource struct {
+	urls    []string
+	fetcher *github.Fetcher
+	logger  *slog.Logger
+}
 
+func (s *repoDocumentSource) Load(ctx context.Context) ([]domain.Document, error) {
+	docs := make([]domain.Document, 0, len(s.urls))
+	for _, u := range s.urls {
+		content, err := s.fetcher.Fetch(ctx, u)
+		if err != nil {
+			s.logger.Warn("repo ingest: skipping file", "url", u, "err", err)
+			continue
+		}
+		doc, err := domain.NewDocument(u, content)
+		if err != nil {
+			s.logger.Warn("repo ingest: skipping file", "url", u, "err", err)
+			continue
+		}
+		docs = append(docs, doc)
+	}
+	if len(docs) == 0 {
+		return nil, errors.New("no documents could be fetched from the repo")
+	}
+	return docs, nil
+}
+
+func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, report func(processed, total int)) (int, error) {
 	maxChars := spec.MaxChars
 	if maxChars < 1 {
 		maxChars = embedderMaxChars
@@ -172,7 +199,16 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 		overlap = defaultOverlap
 	}
 
-	source := documentSource{documents: []domain.Document{document}}
+	var source domain.DocumentSource
+	if len(spec.URLs) > 0 {
+		source = &repoDocumentSource{urls: spec.URLs, fetcher: c.fetcher, logger: c.logger}
+	} else {
+		document, err := domain.NewDocument(spec.Name, spec.Content)
+		if err != nil {
+			return 0, err
+		}
+		source = documentSource{documents: []domain.Document{document}}
+	}
 	chunker := markdown.NewSplitter(maxChars, overlap)
 	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, spec.Collection, c.schema)
 	service := application.NewIngestService(source, chunker, c.embedder, repo, 16,

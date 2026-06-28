@@ -39,6 +39,9 @@ type IngestSpec struct {
 	Collection string
 	MaxChars   int
 	Overlap    int
+	// URLs, when set, are raw .md URLs to fetch and ingest as one job (repo ingestion);
+	// Name/Content are then unused.
+	URLs []string
 }
 
 type Ingester interface {
@@ -160,10 +163,25 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := s.resolveSource(r.Context(), req.Source)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	spec := IngestSpec{Collection: req.Collection, MaxChars: req.MaxChars, Overlap: req.Overlap}
+	if req.Source.Type == "github_repo" {
+		if s.repoLister == nil {
+			writeError(w, http.StatusBadRequest, "github repo source is not configured")
+			return
+		}
+		urls, err := s.repoLister.ListMarkdown(r.Context(), req.Source.URL)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		spec.URLs = urls
+	} else {
+		doc, err := s.resolveSource(r.Context(), req.Source)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		spec.Name, spec.Content = doc.Path(), doc.Content()
 	}
 
 	if err := s.validateTarget(r.Context(), req.Collection); err != nil {
@@ -175,14 +193,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := s.jobs.Submit(IngestSpec{
-		Name:       doc.Path(),
-		Content:    doc.Content(),
-		Collection: req.Collection,
-		MaxChars:   req.MaxChars,
-		Overlap:    req.Overlap,
-	})
-	writeJSON(w, http.StatusAccepted, ingestResponse{JobID: id})
+	writeJSON(w, http.StatusAccepted, ingestResponse{JobID: s.jobs.Submit(spec)})
 }
 
 func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {

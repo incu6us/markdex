@@ -77,8 +77,12 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
 ## Tier 3 — Source coverage & freshness
 
 - [ ] **More source types** — PDF, HTML, docx (markdown only today).
-- [ ] **Repo / folder ingestion** — pull every `.md` from a repo/path (currently single raw
-      `.md` URL or upload).
+- [x] **Repo / folder ingestion** — `github_repo` source lists every `.md` in a GitHub repo (or
+      a `/tree/<branch>/<subpath>`) via the git trees API (`github.RepoLister`) and ingests them
+      all in one async job; per-file fetch failures are skipped + logged. Optional `GITHUB_TOKEN`
+      raises the 60/hr unauthenticated limit and enables private repos. Verified end-to-end
+      ingesting `incu6us/markdex` (README + docs → 25 chunks); httptest-mocked listing + handler
+      tests. UI: a **GitHub repo** source tab in Ingest.
 - [ ] **Scheduled / incremental re-sync** — refresh sources on a schedule, not just manually.
 - [ ] **Collection reconciliation** — remove points for source docs that no longer exist
       (delete-by-source only handles re-ingested docs; vanished ones leave orphans).

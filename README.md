@@ -12,8 +12,9 @@ Three containers, each with one job:
 - **embedder** (Python sidecar) — BGE-M3 embeddings + cross-encoder reranking (MiniLM by default).
 - **qdrant** — vector store (dense + sparse named vectors, RRF fusion).
 
-The **React UI** (`web/`) lets you upload a `.md` file or paste a raw GitHub `.md` URL,
-preview the H1-topic split, and ingest into a new or existing collection.
+The **React UI** (`web/`) lets you upload a `.md` file, paste a raw GitHub `.md` URL, or point
+at a whole **GitHub repo** (every `.md`), preview the H1-topic split, and ingest into a new or
+existing collection.
 
 ## Architecture
 
@@ -209,10 +210,16 @@ Endpoints:
 | `GET /api/jobs/{id}` | Job state (`pending`/`running`/`succeeded`/`failed`, progress, count). |
 | `GET /api/jobs/{id}/stream` | Server-Sent Events stream of the same job state. |
 
-A request `source` is either `{ "type": "upload", "name", "content" }` or
-`{ "type": "github_raw", "url": "https://raw.githubusercontent.com/owner/repo/ref/file.md" }`
-(a `github.com/.../blob/...` URL is accepted and rewritten to raw). Ingesting into an
-existing collection whose dimension/vector doesn't match the model is rejected with `409`.
+A request `source` is one of:
+- `{ "type": "upload", "name", "content" }`
+- `{ "type": "github_raw", "url": "https://raw.githubusercontent.com/owner/repo/ref/file.md" }`
+  (a `github.com/.../blob/...` URL is accepted and rewritten to raw)
+- `{ "type": "github_repo", "url": "https://github.com/owner/repo" }` — ingests **every `.md`**
+  in the repo (or a `…/tree/<branch>/<subpath>`, or the shorthand `owner/repo`) as one job.
+  Set `GITHUB_TOKEN` to raise GitHub's 60/hr unauthenticated limit and to reach private repos.
+
+Ingesting into an existing collection whose dimension/vector doesn't match the model is
+rejected with `409`.
 
 Search:
 
@@ -274,7 +281,7 @@ internal/application/
   search.go                                   SearchService (embed query → hybrid search → rerank → optional expand)
 
 internal/infrastructure/
-  github/fetcher.go                           fetches raw .md from GitHub (blob → raw)
+  github/fetcher.go / repolister.go           fetch raw .md (blob → raw); list every .md in a repo/path
   markdown/splitter.go                        Chunker: recursive, code-fence-aware H1 splitter
   embedderclient/                             HTTP client to the embedder sidecar (Embedder + Reranker + TokenCounter)
   markdexclient/                              REST client to markdex's own API (used by cmd/mcp)
