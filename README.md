@@ -268,7 +268,7 @@ internal/infrastructure/
   httpapi/                                    HTTP server: preview / collections / ingest / search / jobs (+ SSE)
 
 cmd/eval/                                     retrieval eval harness (golden set → MRR / Hit@k)
-cmd/mcp/                                       MCP (stdio) server exposing a `search` tool
+cmd/mcp/                                       MCP (stdio) server: search + discovery tools (official go-sdk)
 services/embedder/                            Python sidecar: BGE-M3 embeddings + cross-encoder reranker
 web/                                          React (Vite) UI for the HTTP API
 ```
@@ -296,18 +296,68 @@ go vet ./...
 
 ## Use it from an AI agent (MCP)
 
-`cmd/mcp` is a tiny, dependency-free [Model Context Protocol](https://modelcontextprotocol.io)
-(stdio) server that exposes markdex retrieval as a **`search`** tool — so Claude Code (or any
-MCP client) can query a collection with hybrid search + reranking. With markdex running:
+`cmd/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) (stdio) server, built
+on the official [`go-sdk`](https://github.com/modelcontextprotocol/go-sdk), that exposes markdex
+retrieval to Claude Code (or any MCP client). It's a thin client of markdex's REST API, so the
+markdex stack must be running for it to work.
 
-```sh
-claude mcp add markdex -e MARKDEX_URL=http://localhost:4334 -- go run ./cmd/mcp
-# or build a binary: go build -o bin/markdex-mcp ./cmd/mcp  →  claude mcp add markdex -- bin/markdex-mcp
-```
+### Install in Claude Code
 
-The `search` tool takes `{ collection, query, top_k?, expand? }` and returns the reranked
-chunks (or full sections, with `expand`). It calls `POST /api/search` under the hood, so the
-agent gets the same hybrid + cross-encoder quality the UI does.
+1. **Start markdex** — the MCP server just proxies to it:
+
+   ```sh
+   make docker-up          # app :4334, embedder, qdrant
+   ```
+
+2. **Register the server** with `claude mcp add`. Everything after `--` is the launch command;
+   `-e KEY=VALUE` sets env. `MARKDEX_URL` defaults to `http://localhost:4334`, so it's optional
+   on the default port.
+
+   ```sh
+   # run straight from source (cwd must be the repo, so ./cmd/mcp resolves):
+   claude mcp add markdex -e MARKDEX_URL=http://localhost:4334 -- go run ./cmd/mcp
+
+   # or build a binary once (faster startup, runs from anywhere) — recommended:
+   go build -o bin/markdex-mcp ./cmd/mcp
+   claude mcp add markdex -e MARKDEX_URL=http://localhost:4334 -- /abs/path/to/bin/markdex-mcp
+   ```
+
+   Pick a **scope** with `-s`: `local` (default — just you, this project), `project` (writes
+   `.mcp.json`, shared with the repo), or `user` (all your projects).
+
+3. **Verify**:
+
+   ```sh
+   claude mcp list           # markdex should be listed
+   claude mcp get markdex    # shows command, env, scope
+   ```
+
+   Inside a session, `/mcp` shows connection status and the exposed tools. Then just ask
+   naturally — e.g. *"list the markdex collections, then search go-style-guide for error
+   wrapping."* The tools are read-only, so they run without write-permission prompts.
+
+   Remove it with `claude mcp remove markdex`.
+
+   **Troubleshooting:** if `/mcp` shows markdex as *failed*, the markdex stack isn't up
+   (`docker compose ps`) or `MARKDEX_URL` is wrong. On startup the server logs
+   `markdex-mcp: serving over stdio, markdex at <url>` to stderr, which Claude Code surfaces in
+   the MCP error view.
+
+### Tools
+
+It offers three **read-only** tools (annotated as such for the client), so an agent can discover
+collections and structure before querying:
+
+| Tool | Input | Returns |
+| --- | --- | --- |
+| `list_collections` | — | every collection with its point count + dimension |
+| `list_headings` | `{ collection }` | the collection's heading paths (valid `heading_path` filters) |
+| `search` | `{ collection, query, top_k?, expand? }` | reranked chunks, or full sections with `expand` |
+
+Each tool returns both human-readable text **and** structured output (the SDK generates an
+`outputSchema` from the typed result). They call markdex's REST API under the hood via the
+`internal/infrastructure/markdexclient` adapter, so agents get the same hybrid + cross-encoder
+quality the UI does.
 
 ## Retrieval evaluation
 
