@@ -31,7 +31,7 @@ preview the H1-topic split, and ingest into a new or existing collection.
                        ┌──────────────────────┐  ┌──────────────────────────┐
                        │ embedder (Python)    │  │ qdrant                   │
                        │  BGE-M3 dense+sparse │  │  dense + sparse vectors  │
-                       │  bge-reranker-v2-m3  │  │  RRF fusion              │
+                       │  cross-encoder rerank│  │  RRF fusion              │
                        └──────────────────────┘  └──────────────────────────┘
 
   ingest:  load → split (H1→H2→…→window) → embed(document) → upsert dense+sparse
@@ -265,7 +265,8 @@ internal/infrastructure/
   qdrant/repository.go                        VectorRepository: hybrid Prepare/Replace/Search/List
   httpapi/                                    HTTP server: preview / collections / ingest / search / jobs (+ SSE)
 
-services/embedder/                            Python sidecar: BGE-M3 + bge-reranker-v2-m3
+cmd/eval/                                     retrieval eval harness (golden set → MRR / Hit@k)
+services/embedder/                            Python sidecar: BGE-M3 embeddings + cross-encoder reranker
 web/                                          React (Vite) UI for the HTTP API
 ```
 
@@ -282,6 +283,7 @@ internal/infrastructure/github/               URL normalization + fetch (httptes
 internal/infrastructure/embedderclient/       sidecar contract: embed / rerank / info (httptest)
 internal/infrastructure/qdrant/               hybrid wire contract: prepare/replace/search/list (httptest)
 internal/infrastructure/httpapi/              handlers + async job lifecycle (httptest)
+cmd/eval/                                     eval scoring metrics (MRR / Hit@k)
 ```
 
 ```sh
