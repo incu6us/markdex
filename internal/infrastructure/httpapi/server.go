@@ -96,10 +96,19 @@ func staticHandler(ui fs.FS) http.Handler {
 		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if name != "" {
 			if info, err := fs.Stat(ui, name); err == nil && !info.IsDir() {
+				if strings.HasPrefix(name, "assets/") {
+					// Vite fingerprints these by content hash, so they never change.
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
 				fileServer.ServeHTTP(w, r)
 				return
 			}
 		}
+		// index.html must be revalidated every load so a redeploy's new asset
+		// hashes are picked up instead of a stale cached shell.
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFileFS(w, r, ui, "index.html")
 	})
 }

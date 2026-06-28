@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/incu6us/markdex/internal/domain"
@@ -270,6 +271,36 @@ func TestHandleCreateCollectionValidation(t *testing.T) {
 	rec := doRequest(t, newTestServer(t, testDeps{creator: &stubCreator{}}), http.MethodPost, "/api/collections", map[string]string{"name": "  "})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestStaticCacheHeaders(t *testing.T) {
+	t.Parallel()
+
+	ui := fstest.MapFS{
+		"index.html":             {Data: []byte("<!doctype html><div id=root></div>")},
+		"assets/index-abc123.js": {Data: []byte("console.log(1)")},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := httpapi.NewServer(httpapi.Config{UI: ui, Logger: logger}).Handler()
+
+	cases := []struct {
+		name, path, wantCache string
+	}{
+		{"index root", "/", "no-cache"},
+		{"spa fallback route", "/search", "no-cache"},
+		{"hashed asset", "/assets/index-abc123.js", "public, max-age=31536000, immutable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if got := rec.Header().Get("Cache-Control"); got != tc.wantCache {
+				t.Fatalf("%s Cache-Control = %q, want %q", tc.path, got, tc.wantCache)
+			}
+		})
 	}
 }
 
