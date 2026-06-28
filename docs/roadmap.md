@@ -28,7 +28,8 @@ markdex has no search endpoint of its own.
 - [ ] **Expose retrieval as an MCP tool** — the dense vector + model changed (now BGE-M3),
       so stock `qdrant-find` no longer matches; surface the reranked `/api/search` path to
       agents via an MCP tool instead.
-- [ ] **Search UI** — a query box in the React app over `/api/search`.
+- [x] **Search UI** — Ingest/Search nav in the React app; collection picker + query + `top_k`
+      → ranked results (title, heading_path, rerank score, snippet) over `/api/search`.
 
 ## Tier 2 — Embedding & chunk quality
 
