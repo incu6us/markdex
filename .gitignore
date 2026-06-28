@@ -1,0 +1,14 @@
+# compiled binary (module name)
+/markdex
+/embed-demo
+/bin/
+
+# downloaded embedding model cache (~77MB)
+/model_cache/
+
+# go test/coverage artifacts
+*.out
+*.test
+
+# local Claude Code settings
+.claude/settings.local.json

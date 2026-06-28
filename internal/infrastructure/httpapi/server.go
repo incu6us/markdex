@@ -1,0 +1,132 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"path"
+	"strings"
+
+	"github.com/incu6us/markdex/internal/domain"
+)
+
+type ModelInfo struct {
+	Dimension  int
+	VectorName string
+}
+
+type Fetcher interface {
+	Fetch(ctx context.Context, url string) (string, error)
+}
+
+type Config struct {
+	Chunker domain.Chunker
+	Fetcher Fetcher
+	Lister  CollectionLister
+	Creator CollectionCreator
+	Jobs    *JobManager
+	Model   ModelInfo
+	UI      fs.FS
+	Logger  *slog.Logger
+}
+
+type Server struct {
+	chunker domain.Chunker
+	fetcher Fetcher
+	lister  CollectionLister
+	creator CollectionCreator
+	jobs    *JobManager
+	model   ModelInfo
+	ui      fs.FS
+	logger  *slog.Logger
+}
+
+func NewServer(cfg Config) *Server {
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Server{
+		chunker: cfg.Chunker,
+		fetcher: cfg.Fetcher,
+		lister:  cfg.Lister,
+		creator: cfg.Creator,
+		jobs:    cfg.Jobs,
+		model:   cfg.Model,
+		ui:      cfg.UI,
+		logger:  logger,
+	}
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/preview", s.handlePreview)
+	mux.HandleFunc("GET /api/collections", s.handleCollections)
+	mux.HandleFunc("POST /api/collections", s.handleCreateCollection)
+	mux.HandleFunc("POST /api/ingest", s.handleIngest)
+	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
+	mux.HandleFunc("GET /api/jobs/{id}/stream", s.handleJobStream)
+	if s.ui != nil {
+		mux.Handle("/", staticHandler(s.ui))
+	}
+	return mux
+}
+
+func staticHandler(ui fs.FS) http.Handler {
+	fileServer := http.FileServerFS(ui)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name != "" {
+			if info, err := fs.Stat(ui, name); err == nil && !info.IsDir() {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		http.ServeFileFS(w, r, ui, "index.html")
+	})
+}
+
+type sourceRequest struct {
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	URL     string `json:"url"`
+}
+
+func (s *Server) resolveSource(ctx context.Context, src sourceRequest) (domain.Document, error) {
+	switch src.Type {
+	case "", "upload":
+		return domain.NewDocument(src.Name, src.Content)
+	case "github_raw":
+		if s.fetcher == nil {
+			return domain.Document{}, errors.New("github source is not configured")
+		}
+		content, err := s.fetcher.Fetch(ctx, src.URL)
+		if err != nil {
+			return domain.Document{}, err
+		}
+		return domain.NewDocument(src.URL, content)
+	default:
+		return domain.Document{}, fmt.Errorf("unsupported source type %q", src.Type)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func decodeJSON(r *http.Request, v any) error {
+	defer r.Body.Close()
+	return json.NewDecoder(r.Body).Decode(v)
+}

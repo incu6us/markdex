@@ -1,0 +1,31 @@
+ONNX_PATH ?= /opt/homebrew/lib/libonnxruntime.dylib
+QDRANT_URL ?= http://localhost:6333
+QDRANT_VERSION ?= v1.18.2
+ADDR ?= :4334
+
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
+BIN ?= bin/markdex-$(GOOS)-$(GOARCH)
+
+.PHONY: run-qdrant ui-build run build test
+
+## run-qdrant: start a local Qdrant instance
+run-qdrant:
+	docker run -d -p 6333:6333 qdrant/qdrant:$(QDRANT_VERSION)
+
+## ui-build: install deps and rebuild the web UI into web/dist
+ui-build:
+	cd web && npm install && npm run build
+
+## run: rebuild the UI and run the backend (which also serves the UI at $(ADDR))
+run: ui-build
+	ONNX_PATH=$(ONNX_PATH) go run . -addr $(ADDR) -qdrant $(QDRANT_URL)
+
+## build: build the UI and backend into one OS-specific binary (UI embedded)
+build: ui-build
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $(BIN) .
+	@echo "built $(BIN)"
+
+## test: run the Go test suite
+test:
+	go test ./...
