@@ -25,7 +25,7 @@ import (
 const (
 	embedderMaxChars = 2000
 	defaultOverlap   = 200
-	searchPoolSize   = 50
+	defaultPoolSize  = 24
 )
 
 //go:embed all:web/dist
@@ -35,6 +35,7 @@ func main() {
 	qdrantURL := flag.String("qdrant", envOr("QDRANT_URL", "http://localhost:6333"), "Qdrant REST base URL")
 	embedderURL := flag.String("embedder", envOr("EMBEDDER_URL", "http://localhost:8000"), "embedder sidecar base URL")
 	addr := flag.String("addr", ":4334", "HTTP listen address")
+	poolSize := flag.Int("pool", defaultPoolSize, "rerank candidate pool size (lower = faster search, higher = better recall)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -56,7 +57,7 @@ func main() {
 	}
 	model := httpapi.ModelInfo{Dimension: info.DenseDim, VectorName: info.DenseName}
 
-	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder, schema, model, logger); err != nil {
+	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder, schema, model, *poolSize, logger); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
@@ -84,6 +85,7 @@ func serveAPI(
 	embedder *embedderclient.Client,
 	schema domain.CollectionSchema,
 	model httpapi.ModelInfo,
+	poolSize int,
 	logger *slog.Logger,
 ) error {
 	ingester := &chunkIngester{embedder: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
@@ -96,7 +98,7 @@ func serveAPI(
 		Fetcher:  github.NewFetcher(),
 		Lister:   &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
 		Creator:  &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
-		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize},
 		Jobs:     manager,
 		Model:    model,
 		UI:       embeddedUI(logger),
@@ -180,11 +182,12 @@ type chunkSearcher struct {
 	qdrantURL string
 	apiKey    string
 	schema    domain.CollectionSchema
+	poolSize  int
 }
 
 func (s *chunkSearcher) Search(ctx context.Context, collection, query string, topK int, filter domain.Filter) ([]domain.SearchHit, error) {
 	repo := qdrant.NewRepository(s.qdrantURL, s.apiKey, collection, s.schema)
-	service := application.NewSearchService(s.embedder, repo, s.reranker, searchPoolSize)
+	service := application.NewSearchService(s.embedder, repo, s.reranker, s.poolSize)
 	return service.Search(ctx, query, topK, filter)
 }
 

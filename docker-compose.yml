@@ -10,6 +10,15 @@ services:
   embedder:
     build: ./services/embedder
     restart: unless-stopped
+    environment:
+      # fp16 is faster here — Apple Silicon (arm64) has native fp16; measured ~5x vs fp32.
+      USE_FP16: "true"
+      # rerank short topic chunks; halves cross-encoder cost vs the 512 default.
+      RERANK_MAX_LENGTH: "256"
+      # English MiniLM cross-encoder: ~55x faster on CPU than bge-reranker-v2-m3
+      # (0.1s vs 6s for a 24-doc pool). For multilingual/highest quality on a GPU,
+      # set BAAI/bge-reranker-v2-m3 instead.
+      RERANK_MODEL: cross-encoder/ms-marco-MiniLM-L-6-v2
     volumes:
       # persists the BGE-M3 + reranker models (~4.5GB, downloaded on first start)
       - hf_cache:/root/.cache/huggingface

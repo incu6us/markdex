@@ -164,9 +164,24 @@ dimension + vector names from the sidecar's `/info` to size collections.
 | `-addr`      | `:4334`                 | HTTP listen address                                 |
 | `-qdrant`    | `http://localhost:6333` | Qdrant REST base URL (`QDRANT_URL` env)             |
 | `-embedder`  | `http://localhost:8000` | Embedder sidecar base URL (`EMBEDDER_URL` env)      |
+| `-pool`      | `24`                    | Rerank candidate pool (lower = faster, higher = better recall) |
 
 `QDRANT_API_KEY` is read from the environment and sent as the `api-key` header when set.
 Per-document `max_chars` and `overlap` are set per ingest request.
+
+### Tuning search latency
+
+Search cost is dominated by the cross-encoder reranker running on CPU (one forward pass per
+candidate). The sidecar env knobs (in `docker-compose.yml`) trade speed vs. quality:
+
+| Env (embedder) | Default | Effect |
+|---|---|---|
+| `RERANK_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | The big lever. MiniLM (English, 22M) reranks a 24-pool in ~0.1 s; `BAAI/bge-reranker-v2-m3` (multilingual, 568M) is higher quality but ~55× slower on CPU (~6 s) — prefer it only on a GPU. |
+| `RERANK_MAX_LENGTH` | `256` | Tokens per query–doc pair; lower is faster. |
+| `USE_FP16` | `true` | fp16 is faster on Apple Silicon (native arm64 fp16); set `false` only if your CPU lacks fp16. |
+
+Plus the app's `-pool` flag (rerank candidate count). With MiniLM, end-to-end search on a
+~100-chunk collection is well under a second.
 
 ## HTTP API + Web UI
 

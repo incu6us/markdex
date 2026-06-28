@@ -154,3 +154,18 @@ Qdrant 1.18.2 supports prefetch + fusion natively.
       embedder needs a few GB of free Docker **disk** for the ~4.5 GB models, in addition to
       RAM — a full disk crash-loops it on the reranker download.)
 - [x] Phase 10 — docs (README, roadmap check-offs, this file).
+
+## Performance tuning (post-launch)
+
+Profiled search on the live stack (go-style-guide, 115 chunks, 8 CPU / 16 GB, no GPU):
+query embed ~0.15 s, Qdrant hybrid query ~0.002 s, **rerank dominates**. `bge-reranker-v2-m3`
+(568M, XLM-R-large) costs ~0.25 s **per candidate** on CPU → a 24-pool was ~6 s.
+
+Changes:
+- **Reranker → `cross-encoder/ms-marco-MiniLM-L-6-v2`** (22M, English) via `RERANK_MODEL`:
+  24-pool rerank ~0.11 s, end-to-end search **~6.5 s → ~0.4 s**, quality intact on English
+  docs (all top-5 hits in the right section). bge-reranker-v2-m3 remains the choice for
+  multilingual / GPU.
+- `RERANK_MAX_LENGTH` 512 → **256**; configurable `-pool` (default **24**).
+- Kept `USE_FP16=true` — fp16 is ~5× faster than fp32 here (Apple Silicon arm64 has native
+  fp16; the common "fp16 is slow on CPU" wisdom is x86-specific).
