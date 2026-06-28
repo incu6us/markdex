@@ -67,8 +67,12 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
 
 - [x] **Retrieval eval harness** — `cmd/eval` posts a golden query set to `/api/search` and
       reports **MRR / Hit@1 / Hit@3 / Hit@k**; pure scoring logic is unit-tested. Run with
-      `make eval`. Baseline on `go-style-guide` (16 queries): MRR 0.91, Hit@1 0.88, Hit@10 1.0.
-      Use it to detect regressions and compare configs (reranker model, pool size).
+      `make eval` (or `make eval-seed` to ingest the pinned fixture first). Baseline on
+      `go-style-guide` (16 queries): MRR 0.91, Hit@1 0.88, Hit@10 1.0. Use it to detect
+      regressions and compare configs (reranker model, pool size).
+- [x] **Eval in the UI** — an Eval tab in the React app runs an (editable) golden set against
+      `/api/search` in-browser and shows MRR / Hit@k + per-query ranks, for interactive
+      config A/B testing.
 
 ---
 
