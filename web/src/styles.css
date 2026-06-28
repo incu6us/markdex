@@ -132,6 +132,68 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.danger {
+  background: var(--error);
+  color: #0b0e17;
+  font-weight: 600;
+}
+
+button.danger-outline {
+  background: transparent;
+  border: 1px solid var(--error);
+  color: var(--error);
+  white-space: nowrap;
+}
+
+.collection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.collection-row {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.collection-row:last-child {
+  border-bottom: none;
+}
+
+.collection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.collection-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.collection-name {
+  font-weight: 600;
+}
+
+.collection-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.confirm-box {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  background: rgba(255, 107, 107, 0.06);
+}
+
+.confirm-box .field.row {
+  margin: 0.5rem 0 0;
+}
+
 .hint {
   color: var(--muted);
   font-size: 0.85rem;

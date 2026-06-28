@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { previewSource, listCollections, createCollection, startIngest } from './api.js'
 import Search from './Search.jsx'
 import Eval from './Eval.jsx'
+import Collections from './Collections.jsx'
 
 const TERMINAL = ['succeeded', 'failed']
 
@@ -132,6 +133,9 @@ export default function App() {
         <button className={mode === 'search' ? 'active' : ''} onClick={() => setMode('search')}>
           Search
         </button>
+        <button className={mode === 'collections' ? 'active' : ''} onClick={() => setMode('collections')}>
+          Collections
+        </button>
         <button className={mode === 'eval' ? 'active' : ''} onClick={() => setMode('eval')}>
           Eval
         </button>
@@ -140,6 +144,7 @@ export default function App() {
       {error && <div className="banner error">{error}</div>}
 
       {mode === 'search' && <Search collections={collections} />}
+      {mode === 'collections' && <Collections collections={collections} onChange={refreshCollections} />}
       {mode === 'eval' && <Eval collections={collections} />}
 
       {mode === 'ingest' && (

@@ -192,6 +192,7 @@ Endpoints:
 | `POST /api/preview` | Split a source and return the H1-topic tree (no embedding). |
 | `GET /api/collections` | List collections with dimension, named vector, and point count. |
 | `POST /api/collections` | Create a collection sized for the embedding model. |
+| `DELETE /api/collections/{name}` | Delete a collection and all its points → `204`. |
 | `GET /api/collections/{name}/headings` | Distinct `heading_path`s in a collection (for authoring golden sets). |
 | `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }`. |
 | `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. `expand: true` returns each hit's full enclosing section (parent-document retrieval). |

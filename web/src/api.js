@@ -32,6 +32,12 @@ export function createCollection(name) {
   })
 }
 
+export function deleteCollection(name) {
+  return jsonFetch(`/api/collections/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+}
+
 export function startIngest(payload) {
   return jsonFetch('/api/ingest', {
     method: 'POST',

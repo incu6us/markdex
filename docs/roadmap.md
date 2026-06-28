@@ -32,6 +32,9 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       `markdexclient` adapter; register with `claude mcp add markdex -- go run ./cmd/mcp`.
       Typed I/O + structured output + tool annotations; protocol-version negotiation handled by
       the SDK. Verified end-to-end (initialize → tools/list → call).
+- [x] **Collections management UI** — dedicated **Collections** tab listing every collection
+      (name, points, dimension) with create + delete; delete is guarded by type-to-confirm and
+      backed by `DELETE /api/collections/{name}` → Qdrant `Repository.Delete`.
 - [x] **Search UI** — Ingest/Search nav in the React app; collection picker + query + `top_k`
       → ranked results (title, heading_path, rerank score, snippet) over `/api/search`.
 

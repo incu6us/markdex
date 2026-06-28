@@ -98,6 +98,7 @@ func serveAPI(
 		Fetcher:  github.NewFetcher(),
 		Lister:   &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
 		Creator:  &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Deleter:  &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
 		Headings: &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
 		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize},
 		Jobs:     manager,
@@ -209,6 +210,16 @@ type collectionCreator struct {
 func (c *collectionCreator) Create(ctx context.Context, name string) error {
 	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, name, c.schema)
 	return repo.Prepare(ctx)
+}
+
+type collectionDeleter struct {
+	qdrantURL string
+	apiKey    string
+}
+
+func (d *collectionDeleter) Delete(ctx context.Context, name string) error {
+	repo := qdrant.NewRepository(d.qdrantURL, d.apiKey, name, domain.CollectionSchema{})
+	return repo.Delete(ctx)
 }
 
 type headingsProvider struct {

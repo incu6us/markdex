@@ -24,6 +24,10 @@ type CollectionCreator interface {
 	Create(ctx context.Context, name string) error
 }
 
+type CollectionDeleter interface {
+	Delete(ctx context.Context, name string) error
+}
+
 type HeadingsProvider interface {
 	Headings(ctx context.Context, collection string) ([]string, error)
 }
@@ -54,6 +58,20 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, collectionsResponse{Collections: collections})
+}
+
+func (s *Server) handleDeleteCollection(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "collection name is required")
+		return
+	}
+	if err := s.deleter.Delete(r.Context(), name); err != nil {
+		s.logger.Error("delete collection failed", "name", name, "err", err)
+		writeError(w, http.StatusBadGateway, "failed to delete collection")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type createCollectionRequest struct {

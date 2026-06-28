@@ -351,6 +351,14 @@ func (r *Repository) Headings(ctx context.Context) ([]string, error) {
 	return headings, nil
 }
 
+// Delete removes the entire collection (points and config) from Qdrant.
+func (r *Repository) Delete(ctx context.Context) error {
+	if err := r.do(ctx, http.MethodDelete, "/collections/"+r.collection, nil, nil); err != nil {
+		return fmt.Errorf("delete collection %q: %w", r.collection, err)
+	}
+	return nil
+}
+
 func (r *Repository) collectionExists(ctx context.Context) (bool, error) {
 	var out struct {
 		Result struct {

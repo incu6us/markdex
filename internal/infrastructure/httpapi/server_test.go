@@ -44,6 +44,22 @@ func (s *stubCreator) Create(_ context.Context, name string) error {
 	return nil
 }
 
+type stubDeleter struct {
+	mu      sync.Mutex
+	deleted []string
+	err     error
+}
+
+func (s *stubDeleter) Delete(_ context.Context, name string) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.mu.Lock()
+	s.deleted = append(s.deleted, name)
+	s.mu.Unlock()
+	return nil
+}
+
 type stubFetcher struct {
 	content string
 	err     error
@@ -90,6 +106,7 @@ func (s stubHeadings) Headings(context.Context, string) ([]string, error) {
 type testDeps struct {
 	lister   httpapi.CollectionLister
 	creator  httpapi.CollectionCreator
+	deleter  httpapi.CollectionDeleter
 	fetcher  httpapi.Fetcher
 	ingester httpapi.Ingester
 	searcher httpapi.Searcher
@@ -115,6 +132,7 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 		Fetcher:  deps.fetcher,
 		Lister:   deps.lister,
 		Creator:  deps.creator,
+		Deleter:  deps.deleter,
 		Headings: deps.headings,
 		Searcher: deps.searcher,
 		Jobs:     manager,
@@ -252,6 +270,33 @@ func TestHandleCreateCollectionValidation(t *testing.T) {
 	rec := doRequest(t, newTestServer(t, testDeps{creator: &stubCreator{}}), http.MethodPost, "/api/collections", map[string]string{"name": "  "})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestHandleDeleteCollection(t *testing.T) {
+	t.Parallel()
+
+	deleter := &stubDeleter{}
+	handler := newTestServer(t, testDeps{deleter: deleter})
+
+	rec := doRequest(t, handler, http.MethodDelete, "/api/collections/go-guide", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body)
+	}
+	deleter.mu.Lock()
+	defer deleter.mu.Unlock()
+	if len(deleter.deleted) != 1 || deleter.deleted[0] != "go-guide" {
+		t.Fatalf("deleted = %v", deleter.deleted)
+	}
+}
+
+func TestHandleDeleteCollectionError(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{deleter: &stubDeleter{err: errors.New("qdrant down")}})
+	rec := doRequest(t, handler, http.MethodDelete, "/api/collections/go-guide", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
 	}
 }
 

@@ -78,6 +78,20 @@ func (rec *recorder) calls() []recordedRequest {
 	return append([]recordedRequest(nil), rec.requests...)
 }
 
+func TestDeleteRemovesCollection(t *testing.T) {
+	repo, rec := newRepository(t, true)
+
+	if err := repo.Delete(context.Background()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	calls := rec.calls()
+	last := calls[len(calls)-1]
+	if last.method != http.MethodDelete || last.path != "/collections/"+testCollection {
+		t.Fatalf("got %s %s, want DELETE /collections/%s", last.method, last.path, testCollection)
+	}
+}
+
 func embeddedChunk(t *testing.T, sourceID string, index int) domain.EmbeddedChunk {
 	t.Helper()
 	chunk, err := domain.NewChunk(domain.ChunkParams{
