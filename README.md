@@ -46,6 +46,7 @@ on `:4334`. The resulting binary is self-contained (no `web/dist` needed at runt
 | `make build`      | `ui-build`, then build one self-contained binary → `bin/markdex-$(GOOS)-$(GOARCH)` |
 | `make test`       | `go test ./...` |
 | `make docker-up`  | `docker compose up --build -d` (app + Qdrant) |
+| `make docker-stop`| `docker compose stop` (stop containers, keep them + volumes) |
 | `make docker-down`| `docker compose down` (`ARGS=-v` also removes volumes) |
 | `make docker-logs`| follow app + Qdrant logs |
 

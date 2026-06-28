@@ -7,7 +7,7 @@ GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 BIN ?= bin/markdex-$(GOOS)-$(GOARCH)
 
-.PHONY: run-qdrant ui-build run build test docker-up docker-down docker-logs
+.PHONY: run-qdrant ui-build run build test docker-up docker-stop docker-down docker-logs
 
 ## run-qdrant: start a local Qdrant instance
 run-qdrant:
@@ -34,7 +34,11 @@ test:
 docker-up:
 	docker compose up --build -d
 
-## docker-down: stop the stack (use `make docker-down ARGS=-v` to also drop volumes)
+## docker-stop: stop the stack without removing containers or volumes
+docker-stop:
+	docker compose stop
+
+## docker-down: stop and remove the stack (use `make docker-down ARGS=-v` to also drop volumes)
 docker-down:
 	docker compose down $(ARGS)
 
