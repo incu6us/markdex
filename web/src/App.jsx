@@ -17,6 +17,7 @@ export default function App() {
   const [fileContent, setFileContent] = useState('')
   const [githubUrl, setGithubUrl] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
+  const [folderFiles, setFolderFiles] = useState([]) // [{name, content}] from a local folder
 
   const [preview, setPreview] = useState(null)
   const [collections, setCollections] = useState([])
@@ -47,7 +48,23 @@ export default function App() {
     if (sourceType === 'github_repo') {
       return { type: 'github_repo', url: repoUrl.trim() }
     }
+    if (sourceType === 'upload_dir') {
+      return { type: 'upload_dir', files: folderFiles }
+    }
     return { type: 'github_raw', url: githubUrl.trim() }
+  }
+
+  async function onFolderChange(event) {
+    const all = Array.from(event.target.files || [])
+    const mdFiles = all.filter((f) => f.name.toLowerCase().endsWith('.md'))
+    try {
+      const files = await Promise.all(
+        mdFiles.map(async (f) => ({ name: f.webkitRelativePath || f.name, content: await f.text() })),
+      )
+      setFolderFiles(files)
+    } catch (err) {
+      setError(`Could not read folder: ${err.message}`)
+    }
   }
 
   function onFileChange(event) {
@@ -129,9 +146,11 @@ export default function App() {
       ? Boolean(fileContent)
       : sourceType === 'github_repo'
         ? Boolean(repoUrl.trim())
-        : Boolean(githubUrl.trim())
-  // Preview reads a single document; a whole repo is ingested directly.
-  const canPreview = sourceType !== 'github_repo'
+        : sourceType === 'upload_dir'
+          ? folderFiles.length > 0
+          : Boolean(githubUrl.trim())
+  // Preview reads a single document; a whole repo/folder is ingested directly.
+  const canPreview = sourceType === 'upload' || sourceType === 'github_raw'
 
   return (
     <main className="app">
@@ -177,6 +196,9 @@ export default function App() {
           <button className={sourceType === 'github_repo' ? 'active' : ''} onClick={() => setSourceType('github_repo')}>
             GitHub repo
           </button>
+          <button className={sourceType === 'upload_dir' ? 'active' : ''} onClick={() => setSourceType('upload_dir')}>
+            Local folder
+          </button>
         </div>
 
         {sourceType === 'upload' && (
@@ -204,6 +226,16 @@ export default function App() {
               onChange={(e) => setRepoUrl(e.target.value)}
             />
             <span className="hint">Ingests every <code>.md</code> in the repo (or subpath). No preview — ingest directly.</span>
+          </div>
+        )}
+        {sourceType === 'upload_dir' && (
+          <div className="field">
+            <input type="file" webkitdirectory="" directory="" multiple onChange={onFolderChange} />
+            <span className="hint">
+              {folderFiles.length > 0
+                ? `${folderFiles.length} .md file${folderFiles.length === 1 ? '' : 's'} selected — ingest directly.`
+                : 'Pick a folder; every .md in it (recursively) is ingested.'}
+            </span>
           </div>
         )}
 

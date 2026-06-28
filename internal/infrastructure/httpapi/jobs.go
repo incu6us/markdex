@@ -33,15 +33,25 @@ type Job struct {
 	Error      string   `json:"error,omitempty"`
 }
 
+// FileSpec is one in-memory file (name + content), used for folder upload.
+type FileSpec struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+// maxUploadFiles caps how many files a single folder-upload job may carry.
+const maxUploadFiles = 2000
+
 type IngestSpec struct {
 	Name       string
 	Content    string
 	Collection string
 	MaxChars   int
 	Overlap    int
-	// URLs, when set, are raw .md URLs to fetch and ingest as one job (repo ingestion);
-	// Name/Content are then unused.
+	// URLs, when set, are raw .md URLs to fetch and ingest as one job (repo ingestion).
 	URLs []string
+	// Files, when set, are in-memory documents to ingest as one job (folder upload).
+	Files []FileSpec
 }
 
 type Ingester interface {
@@ -164,7 +174,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spec := IngestSpec{Collection: req.Collection, MaxChars: req.MaxChars, Overlap: req.Overlap}
-	if req.Source.Type == "github_repo" {
+	switch req.Source.Type {
+	case "github_repo":
 		if s.repoLister == nil {
 			writeError(w, http.StatusBadRequest, "github repo source is not configured")
 			return
@@ -175,7 +186,17 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		spec.URLs = urls
-	} else {
+	case "upload_dir":
+		if len(req.Source.Files) == 0 {
+			writeError(w, http.StatusBadRequest, "no files provided")
+			return
+		}
+		if len(req.Source.Files) > maxUploadFiles {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("too many files (max %d)", maxUploadFiles))
+			return
+		}
+		spec.Files = req.Source.Files
+	default:
 		doc, err := s.resolveSource(r.Context(), req.Source)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())

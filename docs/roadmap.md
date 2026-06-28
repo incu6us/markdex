@@ -83,6 +83,9 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       raises the 60/hr unauthenticated limit and enables private repos. Verified end-to-end
       ingesting `incu6us/markdex` (README + docs → 25 chunks); httptest-mocked listing + handler
       tests. UI: a **GitHub repo** source tab in Ingest.
+      **Local folder** ingestion too: the `upload_dir` source carries `[{name, content}]` and the
+      UI's **Local folder** tab reads every `.md` in a picked folder client-side
+      (`webkitdirectory`) — no volume mount needed, empty files skipped. Verified e2e.
 - [ ] **Scheduled / incremental re-sync** — refresh sources on a schedule, not just manually.
 - [ ] **Collection reconciliation** — remove points for source docs that no longer exist
       (delete-by-source only handles re-ingested docs; vanished ones leave orphans).

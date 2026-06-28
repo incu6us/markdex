@@ -217,6 +217,9 @@ A request `source` is one of:
 - `{ "type": "github_repo", "url": "https://github.com/owner/repo" }` — ingests **every `.md`**
   in the repo (or a `…/tree/<branch>/<subpath>`, or the shorthand `owner/repo`) as one job.
   Set `GITHUB_TOKEN` to raise GitHub's 60/hr unauthenticated limit and to reach private repos.
+- `{ "type": "upload_dir", "files": [{ "name", "content" }, …] }` — ingests **a local folder**
+  in one job. The UI's **Local folder** tab reads every `.md` in a picked folder client-side
+  (no server-side path / volume mount needed); empty files are skipped.
 
 Ingesting into an existing collection whose dimension/vector doesn't match the model is
 rejected with `409`.

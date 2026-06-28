@@ -200,9 +200,24 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 	}
 
 	var source domain.DocumentSource
-	if len(spec.URLs) > 0 {
+	switch {
+	case len(spec.Files) > 0:
+		docs := make([]domain.Document, 0, len(spec.Files))
+		for _, f := range spec.Files {
+			doc, err := domain.NewDocument(f.Name, f.Content)
+			if err != nil {
+				c.logger.Warn("folder ingest: skipping file", "name", f.Name, "err", err)
+				continue
+			}
+			docs = append(docs, doc)
+		}
+		if len(docs) == 0 {
+			return 0, errors.New("no non-empty .md files to ingest")
+		}
+		source = documentSource{documents: docs}
+	case len(spec.URLs) > 0:
 		source = &repoDocumentSource{urls: spec.URLs, fetcher: c.fetcher, logger: c.logger}
-	} else {
+	default:
 		document, err := domain.NewDocument(spec.Name, spec.Content)
 		if err != nil {
 			return 0, err

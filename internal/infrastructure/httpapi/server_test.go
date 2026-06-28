@@ -442,6 +442,47 @@ func TestHandleIngestGithubRepo(t *testing.T) {
 	}
 }
 
+func TestHandleIngestUploadDir(t *testing.T) {
+	t.Parallel()
+
+	ingester := &capturingIngester{}
+	handler := newTestServer(t, testDeps{ingester: ingester})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+		"source": map[string]any{"type": "upload_dir", "files": []map[string]string{
+			{"name": "a.md", "content": "# A\nbody"},
+			{"name": "docs/b.md", "content": "# B\nmore"},
+		}},
+		"collection": "go-guide",
+	})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body)
+	}
+	jobID := decodeBody[struct {
+		JobID string `json:"job_id"`
+	}](t, rec).JobID
+	if job := waitForJob(t, handler, jobID); job.State != httpapi.JobSucceeded {
+		t.Fatalf("job = %+v, want succeeded", job)
+	}
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
+	if len(ingester.spec.Files) != 2 || ingester.spec.Files[1].Name != "docs/b.md" {
+		t.Fatalf("ingester spec Files = %+v", ingester.spec.Files)
+	}
+}
+
+func TestHandleIngestUploadDirEmpty(t *testing.T) {
+	t.Parallel()
+	handler := newTestServer(t, testDeps{})
+	rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+		"source":     map[string]any{"type": "upload_dir", "files": []map[string]string{}},
+		"collection": "go-guide",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestHandleIngestGithubRepoListError(t *testing.T) {
 	t.Parallel()
 	handler := newTestServer(t, testDeps{repoLister: &stubRepoLister{err: errors.New("repo not found")}})

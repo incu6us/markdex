@@ -122,10 +122,11 @@ func staticHandler(ui fs.FS) http.Handler {
 }
 
 type sourceRequest struct {
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	URL     string `json:"url"`
+	Type    string     `json:"type"`
+	Name    string     `json:"name"`
+	Content string     `json:"content"`
+	URL     string     `json:"url"`
+	Files   []FileSpec `json:"files"`
 }
 
 func (s *Server) resolveSource(ctx context.Context, src sourceRequest) (domain.Document, error) {
