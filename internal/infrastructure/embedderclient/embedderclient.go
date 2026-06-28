@@ -93,6 +93,30 @@ func (c *Client) Embed(ctx context.Context, texts []string, kind domain.EmbedKin
 	return vectors, nil
 }
 
+type tokenizeRequest struct {
+	Texts []string `json:"texts"`
+}
+
+type tokenizeResponse struct {
+	Counts    []int `json:"counts"`
+	MaxLength int   `json:"max_length"`
+}
+
+// CountTokens returns the model token count for each text (implements domain.TokenCounter).
+func (c *Client) CountTokens(ctx context.Context, texts []string) ([]int, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	var resp tokenizeResponse
+	if err := c.do(ctx, http.MethodPost, "/tokenize", tokenizeRequest{Texts: texts}, &resp); err != nil {
+		return nil, err
+	}
+	if len(resp.Counts) != len(texts) {
+		return nil, fmt.Errorf("tokenize count mismatch: got %d for %d texts", len(resp.Counts), len(texts))
+	}
+	return resp.Counts, nil
+}
+
 type rerankRequest struct {
 	Query     string   `json:"query"`
 	Documents []string `json:"documents"`
@@ -152,7 +176,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if err != nil {
 		return fmt.Errorf("embedder %s %s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

@@ -25,7 +25,12 @@ import (
 const (
 	embedderMaxChars = 2000
 	defaultOverlap   = 200
-	defaultPoolSize  = 24
+	// embedderMaxTokens mirrors the embedder's MAX_LENGTH (BGE-M3, 8192): chunks are
+	// re-split if their embedded text exceeds it, so nothing is silently truncated.
+	embedderMaxTokens = 8192
+	// dedupThreshold drops chunks that are >=90% shingle-identical to an earlier one.
+	dedupThreshold  = 0.9
+	defaultPoolSize = 24
 )
 
 //go:embed all:web/dist
@@ -88,7 +93,7 @@ func serveAPI(
 	poolSize int,
 	logger *slog.Logger,
 ) error {
-	ingester := &chunkIngester{embedder: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
+	ingester := &chunkIngester{embedder: embedder, counter: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
 	manager := httpapi.NewJobManager(ingester, logger)
 	manager.Start()
 	defer manager.Stop()
@@ -146,6 +151,7 @@ func embeddedUI(logger *slog.Logger) fs.FS {
 
 type chunkIngester struct {
 	embedder  domain.Embedder
+	counter   domain.TokenCounter
 	qdrantURL string
 	apiKey    string
 	schema    domain.CollectionSchema
@@ -169,7 +175,11 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 	source := documentSource{documents: []domain.Document{document}}
 	chunker := markdown.NewSplitter(maxChars, overlap)
 	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, spec.Collection, c.schema)
-	service := application.NewIngestService(source, chunker, c.embedder, repo, 16, application.WithProgress(report))
+	service := application.NewIngestService(source, chunker, c.embedder, repo, 16,
+		application.WithProgress(report),
+		application.WithDedup(dedupThreshold),
+		application.WithTokenBudget(c.counter, embedderMaxTokens),
+	)
 
 	result, err := service.Ingest(ctx)
 	if err != nil {

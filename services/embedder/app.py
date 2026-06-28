@@ -35,6 +35,8 @@ def _load_models() -> None:
     _state["torch"] = torch
     _state["rerank_tokenizer"] = AutoTokenizer.from_pretrained(RERANK_MODEL)
     _state["rerank_model"] = reranker
+    # Dedicated tokenizer for accurate chunk-sizing (the same XLM-R tokenizer BGE-M3 uses).
+    _state["embed_tokenizer"] = AutoTokenizer.from_pretrained(EMBED_MODEL)
 
 
 class EmbedRequest(BaseModel):
@@ -56,6 +58,15 @@ class RerankRequest(BaseModel):
     query: str
     documents: list[str]
     top_k: int | None = None
+
+
+class TokenizeRequest(BaseModel):
+    texts: list[str]
+
+
+class TokenizeResponse(BaseModel):
+    counts: list[int]
+    max_length: int
 
 
 @app.get("/healthz")
@@ -95,6 +106,17 @@ def embed(req: EmbedRequest):
         for weights in out["lexical_weights"]
     ]
     return {"dense": dense, "sparse": sparse}
+
+
+@app.post("/tokenize", response_model=TokenizeResponse)
+def tokenize(req: TokenizeRequest):
+    """Real BGE-M3 token counts (incl. special tokens), for token-accurate chunk sizing."""
+    if not req.texts:
+        return {"counts": [], "max_length": MAX_LENGTH}
+    tokenizer = _state["embed_tokenizer"]
+    encoded = tokenizer(req.texts, add_special_tokens=True, truncation=False)
+    counts = [len(ids) for ids in encoded["input_ids"]]
+    return {"counts": counts, "max_length": MAX_LENGTH}
 
 
 @app.post("/rerank")

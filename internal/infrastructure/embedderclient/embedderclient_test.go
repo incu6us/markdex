@@ -97,6 +97,45 @@ func TestEmbedCountMismatch(t *testing.T) {
 	}
 }
 
+func TestCountTokens(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	var gotBody struct {
+		Texts []string `json:"texts"`
+	}
+	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"counts":[7,512],"max_length":8192}`))
+	})
+
+	counts, err := client.CountTokens(context.Background(), []string{"short", "much longer text"})
+	if err != nil {
+		t.Fatalf("CountTokens: %v", err)
+	}
+	if gotPath != "/tokenize" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if len(gotBody.Texts) != 2 || gotBody.Texts[1] != "much longer text" {
+		t.Fatalf("request body = %+v", gotBody)
+	}
+	if len(counts) != 2 || counts[0] != 7 || counts[1] != 512 {
+		t.Fatalf("counts = %v", counts)
+	}
+}
+
+func TestCountTokensEmptySkipsCall(t *testing.T) {
+	t.Parallel()
+	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not call embedder for empty texts")
+	})
+	counts, err := client.CountTokens(context.Background(), nil)
+	if err != nil || counts != nil {
+		t.Fatalf("got %v / %v, want nil/nil", counts, err)
+	}
+}
+
 func TestRerank(t *testing.T) {
 	t.Parallel()
 

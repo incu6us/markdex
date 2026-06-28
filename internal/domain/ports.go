@@ -14,6 +14,12 @@ type Embedder interface {
 	Embed(ctx context.Context, texts []string, kind EmbedKind) ([]Vectors, error)
 }
 
+// TokenCounter returns the model token count for each text, for token-accurate
+// chunk sizing.
+type TokenCounter interface {
+	CountTokens(ctx context.Context, texts []string) ([]int, error)
+}
+
 type VectorRepository interface {
 	Prepare(ctx context.Context) error
 	Replace(ctx context.Context, sourceID string, chunks []EmbeddedChunk) error

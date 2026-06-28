@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/incu6us/markdex/internal/application"
@@ -157,6 +158,91 @@ func TestIngestEmbedsContextualBreadcrumb(t *testing.T) {
 	stored := repo.bySource[doc.Path()]
 	if len(stored) != 1 || stored[0].Chunk.Content() != "wrap with %w" {
 		t.Fatalf("stored content = %#v", stored)
+	}
+}
+
+// runeCounter is a deterministic TokenCounter: one token per rune.
+type runeCounter struct{}
+
+func (runeCounter) CountTokens(_ context.Context, texts []string) ([]int, error) {
+	out := make([]int, len(texts))
+	for i, t := range texts {
+		out[i] = len([]rune(t))
+	}
+	return out, nil
+}
+
+func TestIngestEnforcesTokenBudget(t *testing.T) {
+	t.Parallel()
+
+	doc := document(t, "docs/big.md")
+	big := strings.Repeat("a", 100) // 100 runes → 100 tokens; no heading path so ContextualText == content
+	chunker := &fakeChunker{split: func(domain.Document) ([]domain.Chunk, error) {
+		c, err := domain.NewChunk(domain.ChunkParams{SourceID: doc.Path(), Index: 0, Content: big})
+		if err != nil {
+			return nil, err
+		}
+		return []domain.Chunk{c}, nil
+	}}
+	repo := newFakeRepository()
+	service := application.NewIngestService(
+		&fakeSource{documents: []domain.Document{doc}}, chunker, &fakeEmbedder{dimension: 8}, repo, 16,
+		application.WithTokenBudget(runeCounter{}, 30),
+	)
+
+	res, err := service.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	stored := repo.bySource[doc.Path()]
+	if len(stored) < 2 {
+		t.Fatalf("over-budget chunk should be split, got %d pieces", len(stored))
+	}
+	if res.Ingested != len(stored) {
+		t.Fatalf("ingested %d != stored %d", res.Ingested, len(stored))
+	}
+	seen := map[int]bool{}
+	for i, ec := range stored {
+		if n := len([]rune(ec.Chunk.Content())); n > 30 {
+			t.Fatalf("piece %d has %d runes, exceeds budget 30", i, n)
+		}
+		if idx := ec.Chunk.Index(); seen[idx] {
+			t.Fatalf("duplicate chunk index %d after split (breaks chunk ID uniqueness)", idx)
+		} else {
+			seen[idx] = true
+		}
+	}
+}
+
+func TestIngestDedupesChunks(t *testing.T) {
+	t.Parallel()
+
+	doc := document(t, "docs/dup.md")
+	mk := func(s string) domain.Chunk {
+		c, err := domain.NewChunk(domain.ChunkParams{SourceID: doc.Path(), Index: 0, Content: s})
+		if err != nil {
+			t.Fatalf("chunk: %v", err)
+		}
+		return c
+	}
+	chunker := &fakeChunker{split: func(domain.Document) ([]domain.Chunk, error) {
+		return []domain.Chunk{
+			mk("the quick brown fox jumps over the lazy dog"),
+			mk("the quick brown fox jumps over the lazy dog again"), // near-dup
+			mk("something entirely unrelated about ships and sails"),
+		}, nil
+	}}
+	repo := newFakeRepository()
+	service := application.NewIngestService(
+		&fakeSource{documents: []domain.Document{doc}}, chunker, &fakeEmbedder{dimension: 8}, repo, 16,
+		application.WithDedup(0.8),
+	)
+
+	if _, err := service.Ingest(context.Background()); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if got := len(repo.bySource[doc.Path()]); got != 2 {
+		t.Fatalf("dedup should drop the near-duplicate, stored %d want 2", got)
 	}
 }
 

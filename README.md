@@ -131,6 +131,9 @@ make docker-down    # stop and remove containers/network (ARGS=-v also drops vol
   **headings are retrieval metadata** — descriptive, well-nested `#/##/###` headings produce
   better breadcrumbs (generic ones like *Overview*/*Notes* add no signal). No special file
   format is needed beyond clean heading hygiene.
+- **Token-accurate sizing + dedup** — at ingest, chunks are de-duplicated (word-shingle Jaccard
+  ≥ 0.9) and any chunk whose embedded text exceeds the model window (real BGE-M3 token counts via
+  the embedder's `/tokenize`) is re-split to fit, so nothing is silently truncated.
 - **Search** — the query is embedded, Qdrant runs a hybrid ANN over dense + sparse and fuses
   the two with **Reciprocal Rank Fusion (RRF)**, then a **cross-encoder reranker** reorders the
   candidate pool (`-pool`, default 24) down to the top-k (default 8). Optional metadata filters

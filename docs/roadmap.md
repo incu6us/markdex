@@ -56,9 +56,17 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       recall/disambiguation lever; it shows up on larger/noisier corpora, not one the system
       already nails. Next lever to convert this into a ranking gain: make the **reranker**
       breadcrumb-aware (reconstruct from stored `heading_path` metadata at rerank time).
-- [ ] **Token-accurate chunk sizing** — replace the rune approximation with real tokenizer
-      counts so chunks fit the model window exactly.
-- [ ] **Near-duplicate chunk dedup** — drop near-identical windows to cut noise.
+- [x] **Token-accurate chunk sizing** — the embedder exposes `POST /tokenize` (real BGE-M3
+      tokenizer); ingest counts each chunk's *embedded* (contextual) text and re-splits any chunk
+      over `embedderMaxTokens` (8192, = the model window) into rune windows that fit, verified
+      against real counts (`IngestService.enforceTokenBudget`). *Measured:* on `go-style-guide`,
+      **0 re-splits** — chunks are ~500–700 tokens, far under 8192, so it's a correctness
+      guarantee, not a live fix; activation is unit-tested with a deterministic counter.
+- [x] **Near-duplicate chunk dedup** — `domain.DedupeChunks` drops chunks whose word-shingle
+      Jaccard ≥ 0.9 against an earlier kept chunk, applied before embedding. *Measured:* on
+      `go-style-guide`, **0 dropped** (no near-dups; sliding-window overlap is only ~10% → well
+      below the threshold, so legitimate adjacent windows are kept). Unit-tested.
+      Both run only at ingest; refined chunks are re-indexed so chunk IDs stay unique/ordered.
 
 ## Tier 3 — Source coverage & freshness
 
