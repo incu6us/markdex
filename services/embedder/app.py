@@ -10,6 +10,7 @@ DENSE_NAME = os.getenv("DENSE_NAME", "bge-m3-dense")
 SPARSE_NAME = os.getenv("SPARSE_NAME", "bge-m3-sparse")
 DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 MAX_LENGTH = int(os.getenv("MAX_LENGTH", "8192"))
+RERANK_MAX_LENGTH = int(os.getenv("RERANK_MAX_LENGTH", "512"))
 USE_FP16 = os.getenv("USE_FP16", "true").lower() == "true"
 
 _state: dict = {}
@@ -21,10 +22,19 @@ app = FastAPI(title="markdex embedder")
 def _load_models() -> None:
     # Imported lazily so the module loads (and tooling can import it) without the
     # heavy ML dependencies present.
-    from FlagEmbedding import BGEM3FlagModel, FlagReranker
+    import torch
+    from FlagEmbedding import BGEM3FlagModel
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     _state["embedder"] = BGEM3FlagModel(EMBED_MODEL, use_fp16=USE_FP16)
-    _state["reranker"] = FlagReranker(RERANK_MODEL, use_fp16=USE_FP16)
+
+    # Reranking via transformers directly (the bge-reranker model-card pattern) — avoids a
+    # FlagReranker/transformers slow-tokenizer incompatibility and uses the fast tokenizer.
+    reranker = AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL)
+    reranker.eval()
+    _state["torch"] = torch
+    _state["rerank_tokenizer"] = AutoTokenizer.from_pretrained(RERANK_MODEL)
+    _state["rerank_model"] = reranker
 
 
 class EmbedRequest(BaseModel):
@@ -50,7 +60,7 @@ class RerankRequest(BaseModel):
 
 @app.get("/healthz")
 def healthz():
-    if "embedder" not in _state or "reranker" not in _state:
+    if "embedder" not in _state or "rerank_model" not in _state:
         return JSONResponse(status_code=503, content={"status": "loading"})
     return {"status": "ok"}
 
@@ -92,10 +102,21 @@ def rerank(req: RerankRequest):
     if not req.documents:
         return {"results": []}
 
+    torch = _state["torch"]
+    tokenizer = _state["rerank_tokenizer"]
+    model = _state["rerank_model"]
+
     pairs = [[req.query, doc] for doc in req.documents]
-    scores = _state["reranker"].compute_score(pairs, normalize=True)
-    if not isinstance(scores, list):
-        scores = [scores]
+    inputs = tokenizer(
+        pairs,
+        padding=True,
+        truncation=True,
+        max_length=RERANK_MAX_LENGTH,
+        return_tensors="pt",
+    )
+    with torch.no_grad():
+        logits = model(**inputs).logits.view(-1).float()
+        scores = torch.sigmoid(logits).tolist()
 
     ranked = sorted(enumerate(scores), key=lambda pair: pair[1], reverse=True)
     if req.top_k is not None:

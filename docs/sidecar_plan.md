@@ -130,5 +130,9 @@ Qdrant 1.18.2 supports prefetch + fusion natively.
 
 ## Status
 
-- [~] Phase 1 — sidecar service
-- [ ] Phases 2–10
+- [x] Phase 1 — sidecar service. Verified in-container: `/healthz`, `/info` (dense_dim
+      1024), `/embed` (1024-d dense + sparse terms), `/rerank` (correct relevance order).
+      Reranking uses the transformers `AutoModelForSequenceClassification` pattern (avoids a
+      FlagReranker/transformers slow-tokenizer incompatibility).
+- [ ] Phase 2 — domain ports (`SparseEmbedding`, `Vectors`, `EmbedKind`, `Reranker`)
+- [ ] Phases 3–10
