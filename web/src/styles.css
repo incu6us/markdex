@@ -247,3 +247,50 @@ input.topk {
   -webkit-mask-image: linear-gradient(180deg, #000 75%, transparent);
   mask-image: linear-gradient(180deg, #000 75%, transparent);
 }
+
+textarea.golden {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.metrics {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.metric {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.9rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.metric-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.topic-meta.miss {
+  color: var(--error);
+}
