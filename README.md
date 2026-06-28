@@ -297,12 +297,16 @@ ranks, and reports **MRR / Hit@1 / Hit@3 / Hit@k**. Use it to catch regressions 
 configs (reranker model, `-pool`, etc.).
 
 ```sh
-make eval                                            # needs a running stack with ingested data
-make eval GOLDEN=cmd/eval/golden/go-style-guide.json # custom golden set
+make eval-seed   # ingest the vendored fixture into the collection, then eval (from empty)
+make eval        # eval an already-ingested collection
+make eval GOLDEN=path.json   # custom golden set
 ```
 
-A golden set is JSON: `{ collection, top_k, queries: [{ query, relevant_heading_contains }] }`
-— a result counts as relevant if its `heading_path` contains one of the substrings.
+`eval-seed` makes the harness reproducible from an empty Qdrant: it ingests the **pinned**
+`cmd/eval/golden/go-style-guide.md` (a vendored copy of Google's Go style guide, Apache-2.0)
+into the collection first. A golden set is JSON:
+`{ collection, top_k, queries: [{ query, relevant_heading_contains }] }` — a result counts as
+relevant if its `heading_path` contains one of the substrings.
 
 ## Roadmap
 

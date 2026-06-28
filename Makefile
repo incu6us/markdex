@@ -33,8 +33,13 @@ test:
 ## eval: measure retrieval quality against a golden set (needs a running stack + ingested data)
 ##   override the golden set: make eval GOLDEN=path.json
 GOLDEN ?= cmd/eval/golden/go-style-guide.json
+SEED ?= cmd/eval/golden/go-style-guide.md
 eval:
 	go run ./cmd/eval -addr http://localhost$(ADDR) -golden $(GOLDEN)
+
+## eval-seed: ingest the vendored fixture into a fresh collection, then eval (reproducible from empty)
+eval-seed:
+	go run ./cmd/eval -addr http://localhost$(ADDR) -golden $(GOLDEN) -seed $(SEED)
 
 ## docker-build: rebuild the app image (picks up code changes)
 docker-build:
