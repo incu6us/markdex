@@ -146,11 +146,11 @@ Qdrant 1.18.2 supports prefetch + fusion natively.
       `Search` (dense+sparse, RRF), `IngestService` update, `SearchService`, `POST /api/search`,
       main wiring (embedder client + schema from `/info` + per-collection search), removed
       `fastembed`/ONNX, pure-Go `Dockerfile` (distroless), compose `embedder` service.
-- [x] Phase 9 — verification. All Go unit tests green. Each interface verified against its
-      **real** counterpart: embedder `/embed`+`/rerank` (Phase 1, live); the hybrid
-      create/upsert/RRF-query wire shape against **live Qdrant 1.18.2** (200/ok, correct RRF
-      ranking + filter). The simultaneous 3-service run wasn't completed here — loading
-      BGE-M3 + reranker in RAM alongside Qdrant exhausted the local Docker VM. Repro:
-      `make docker-up` on a host with ≥8 GB allocated to Docker, then create a collection,
-      ingest, and `POST /api/search`.
+- [x] Phase 9 — verification, including the **full live 3-service run** via `make docker-up`
+      (Docker at 16 GB): app + embedder (BGE-M3, dim 1024) + Qdrant. Verified end-to-end —
+      create collection, ingest (3 H1 topics → 3 chunks, dense+sparse), and `POST /api/search`
+      with hybrid retrieval + RRF + cross-encoder rerank: the relevant chunk scores ~0.99 and
+      irrelevant ones ~0.00; metadata filters work. All Go unit tests green. (Note: the
+      embedder needs a few GB of free Docker **disk** for the ~4.5 GB models, in addition to
+      RAM — a full disk crash-loops it on the reranker download.)
 - [x] Phase 10 — docs (README, roadmap check-offs, this file).
