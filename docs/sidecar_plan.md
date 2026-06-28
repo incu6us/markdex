@@ -138,5 +138,8 @@ Qdrant 1.18.2 supports prefetch + fusion natively.
       `Vectors`, `EmbedKind` (Document/Query), `Reranker` port + `Ranked`. Kept additive so
       the module stays green; the breaking `EmbeddedChunk`/`VectorRepository`/`Embedder`
       signature swap rides with the qdrant + ingest rewrite (Phases 4–5).
-- [ ] Phase 3 — `embedderclient` (HTTP client to the sidecar; implements Embedder + Reranker)
-- [ ] Phases 4–10
+- [x] Phase 3 — `embedderclient` (TDD): HTTP client to the sidecar. `Embed` (texts+kind →
+      `[]Vectors`), `Rerank` (implements `domain.Reranker`), `Info` (dim/vector names).
+      Tested against an `httptest` mock mirroring the real sidecar JSON.
+- [ ] Phase 4 — qdrant: `Prepare`/`Replace`/`Search` for dense+sparse (hybrid, RRF)
+- [ ] Phases 5–10
