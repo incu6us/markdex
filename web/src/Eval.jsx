@@ -13,8 +13,7 @@ const DEFAULT_GOLDEN = `{
   ]
 }`
 
-export default function Eval({ collections }) {
-  const [collection, setCollection] = useState('')
+export default function Eval({ collections, collection, onCollection }) {
   const [golden, setGolden] = useState(DEFAULT_GOLDEN)
   const [headings, setHeadings] = useState([])
   const [report, setReport] = useState(null)
@@ -79,7 +78,7 @@ export default function Eval({ collections }) {
         </p>
 
         <div className="field">
-          <select value={collection} onChange={(e) => setCollection(e.target.value)}>
+          <select value={collection} onChange={(e) => onCollection(e.target.value)}>
             <option value="">— choose a collection —</option>
             {collections.map((c) => (
               <option key={c.name} value={c.name}>

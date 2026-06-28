@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { previewSource, listCollections, createCollection, startIngest } from './api.js'
+import usePersistedState from './usePersistedState.js'
 import Search from './Search.jsx'
 import Eval from './Eval.jsx'
 import Collections from './Collections.jsx'
@@ -7,7 +8,10 @@ import Collections from './Collections.jsx'
 const TERMINAL = ['succeeded', 'failed']
 
 export default function App() {
-  const [mode, setMode] = useState('ingest')
+  // Persisted across tab switches and reloads.
+  const [mode, setMode] = usePersistedState('markdex.tab', 'ingest')
+  const [collection, setCollection] = usePersistedState('markdex.collection', '')
+
   const [sourceType, setSourceType] = useState('upload')
   const [fileName, setFileName] = useState('')
   const [fileContent, setFileContent] = useState('')
@@ -16,7 +20,6 @@ export default function App() {
   const [preview, setPreview] = useState(null)
   const [collections, setCollections] = useState([])
   const [targetMode, setTargetMode] = useState('existing')
-  const [selectedCollection, setSelectedCollection] = useState('')
   const [newCollectionName, setNewCollectionName] = useState('')
 
   const [job, setJob] = useState(null)
@@ -71,7 +74,7 @@ export default function App() {
       const created = await createCollection(newCollectionName.trim())
       await refreshCollections()
       setTargetMode('existing')
-      setSelectedCollection(created.name)
+      setCollection(created.name)
       setNewCollectionName('')
     } catch (err) {
       setError(err.message)
@@ -79,7 +82,7 @@ export default function App() {
   }
 
   function targetCollection() {
-    return targetMode === 'existing' ? selectedCollection : newCollectionName.trim()
+    return targetMode === 'existing' ? collection : newCollectionName.trim()
   }
 
   async function onIngest() {
@@ -143,9 +146,11 @@ export default function App() {
 
       {error && <div className="banner error">{error}</div>}
 
-      {mode === 'search' && <Search collections={collections} />}
-      {mode === 'collections' && <Collections collections={collections} onChange={refreshCollections} />}
-      {mode === 'eval' && <Eval collections={collections} />}
+      {mode === 'search' && <Search collections={collections} collection={collection} onCollection={setCollection} />}
+      {mode === 'collections' && (
+        <Collections collections={collections} onChange={refreshCollections} selected={collection} onSelect={setCollection} />
+      )}
+      {mode === 'eval' && <Eval collections={collections} collection={collection} onCollection={setCollection} />}
 
       {mode === 'ingest' && (
         <>
@@ -211,7 +216,7 @@ export default function App() {
 
         {targetMode === 'existing' ? (
           <div className="field">
-            <select value={selectedCollection} onChange={(e) => setSelectedCollection(e.target.value)}>
+            <select value={collection} onChange={(e) => setCollection(e.target.value)}>
               <option value="">— choose a collection —</option>
               {collections.map((c) => (
                 <option key={c.name} value={c.name}>

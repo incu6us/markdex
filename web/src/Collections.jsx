@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createCollection, deleteCollection } from './api.js'
 
-export default function Collections({ collections, onChange }) {
+export default function Collections({ collections, onChange, selected, onSelect }) {
   const [newName, setNewName] = useState('')
   const [deletingName, setDeletingName] = useState('') // collection awaiting type-to-confirm
   const [confirmText, setConfirmText] = useState('')
@@ -17,6 +17,7 @@ export default function Collections({ collections, onChange }) {
       await createCollection(name)
       setNewName('')
       await onChange()
+      onSelect?.(name) // make the new collection the active selection everywhere
     } catch (err) {
       setError(err.message)
     } finally {
@@ -41,6 +42,7 @@ export default function Collections({ collections, onChange }) {
       await deleteCollection(name)
       cancelDelete()
       await onChange()
+      if (name === selected) onSelect?.('') // clear selection if we deleted it
     } catch (err) {
       setError(err.message)
     } finally {

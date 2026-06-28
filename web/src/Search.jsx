@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { search } from './api.js'
 
-export default function Search({ collections }) {
-  const [collection, setCollection] = useState('')
+export default function Search({ collections, collection, onCollection }) {
   const [query, setQuery] = useState('')
   const [topK, setTopK] = useState(8)
   const [expand, setExpand] = useState(false)
@@ -39,7 +38,7 @@ export default function Search({ collections }) {
         <h2>Search</h2>
         <form onSubmit={onSearch}>
           <div className="field">
-            <select value={collection} onChange={(e) => setCollection(e.target.value)}>
+            <select value={collection} onChange={(e) => onCollection(e.target.value)}>
               <option value="">— choose a collection —</option>
               {collections.map((c) => (
                 <option key={c.name} value={c.name}>
