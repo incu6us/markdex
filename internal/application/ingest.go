@@ -104,9 +104,11 @@ func (s *IngestService) embedChunks(ctx context.Context, chunks []domain.Chunk) 
 		end := min(start+s.batchSize, total)
 		batch := chunks[start:end]
 
+		// Embed the contextual text (heading-path breadcrumb + content) so the
+		// vector encodes where the chunk sits; the stored document stays raw.
 		contents := make([]string, len(batch))
 		for i, chunk := range batch {
-			contents[i] = chunk.Content()
+			contents[i] = chunk.ContextualText()
 		}
 
 		vectors, err := s.embedder.Embed(ctx, contents, domain.DocumentKind)

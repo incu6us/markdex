@@ -43,8 +43,18 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
 - [x] **Stronger / longer-context embedder** — swapped `bge-small` (384-dim/512-token) for
       **BGE-M3** (1024-dim dense + sparse, 8k context) in the Python embedder sidecar. The Go
       binary is now pure-Go (no ONNX). (sidecar Phases 1–8)
-- [ ] **Contextual retrieval** — prepend a one-line doc/section context to each chunk before
-      embedding (uses existing `title`/`heading_path`); ~35–50% fewer retrieval failures.
+- [x] **Contextual retrieval (heading-path breadcrumb)** — each chunk is embedded as
+      `humanized(heading_path) + "\n\n" + content` (`domain.Chunk.ContextualText`), so the dense
+      **and** sparse vectors encode where the chunk sits in the document. The stored payload stays
+      the raw content, so search results and `expand` (parent-document retrieval) are unchanged.
+      Authoring implication: headings are now retrieval metadata — descriptive, well-nested
+      `#/##/###` headings produce better breadcrumbs.
+      *Measured:* **no delta on the `go-style-guide` golden set (MRR 0.898, Hit@1 82%, both
+      runs)** — that 22-query set already has **100% Hit@10**, so recall is saturated and the
+      final order is set by the reranker (which scores the raw document). The benefit is a
+      recall/disambiguation lever; it shows up on larger/noisier corpora, not one the system
+      already nails. Next lever to convert this into a ranking gain: make the **reranker**
+      breadcrumb-aware (reconstruct from stored `heading_path` metadata at rerank time).
 - [ ] **Token-accurate chunk sizing** — replace the rune approximation with real tokenizer
       counts so chunks fit the model window exactly.
 - [ ] **Near-duplicate chunk dedup** — drop near-identical windows to cut noise.

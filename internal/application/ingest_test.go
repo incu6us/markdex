@@ -29,9 +29,11 @@ func (f *fakeChunker) Split(doc domain.Document) ([]domain.Chunk, error) {
 
 type fakeEmbedder struct {
 	dimension int
+	seen      []string // texts passed to Embed, in order
 }
 
 func (f *fakeEmbedder) Embed(_ context.Context, texts []string, _ domain.EmbedKind) ([]domain.Vectors, error) {
+	f.seen = append(f.seen, texts...)
 	vectors := make([]domain.Vectors, len(texts))
 	for i := range texts {
 		dense, err := domain.NewEmbedding(make([]float32, f.dimension))
@@ -120,6 +122,42 @@ func fixedChunker(t *testing.T, n int) *fakeChunker {
 	return &fakeChunker{split: func(doc domain.Document) ([]domain.Chunk, error) {
 		return chunksFor(t, doc, n), nil
 	}}
+}
+
+func TestIngestEmbedsContextualBreadcrumb(t *testing.T) {
+	t.Parallel()
+
+	doc := document(t, "docs/x.md")
+	chunker := &fakeChunker{split: func(domain.Document) ([]domain.Chunk, error) {
+		c, err := domain.NewChunk(domain.ChunkParams{
+			SourceID:    doc.Path(),
+			Index:       0,
+			HeadingPath: "guide/error-handling/placement-of-w",
+			Content:     "wrap with %w",
+		})
+		if err != nil {
+			return nil, err
+		}
+		return []domain.Chunk{c}, nil
+	}}
+	emb := &fakeEmbedder{dimension: 8}
+	repo := newFakeRepository()
+	service := application.NewIngestService(&fakeSource{documents: []domain.Document{doc}}, chunker, emb, repo, 16)
+
+	if _, err := service.Ingest(context.Background()); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	// The embedding input carries the breadcrumb so the vector encodes section context.
+	want := "guide > error handling > placement of w\n\nwrap with %w"
+	if len(emb.seen) != 1 || emb.seen[0] != want {
+		t.Fatalf("embedded text = %#v, want %q", emb.seen, want)
+	}
+	// The stored document stays the raw content (clean search results + expand).
+	stored := repo.bySource[doc.Path()]
+	if len(stored) != 1 || stored[0].Chunk.Content() != "wrap with %w" {
+		t.Fatalf("stored content = %#v", stored)
+	}
 }
 
 func TestIngestServiceIngestChunks(t *testing.T) {

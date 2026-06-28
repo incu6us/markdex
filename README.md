@@ -125,6 +125,12 @@ make docker-down    # stop and remove containers/network (ARGS=-v also drops vol
 - **Hybrid embeddings** — each chunk is embedded by BGE-M3 into a **dense** vector (1024-dim,
   cosine) *and* a **sparse** lexical vector. Both are stored as named vectors so search can
   fuse semantic similarity with exact-term matching.
+- **Contextual embedding** — each chunk is embedded with its **heading-path breadcrumb**
+  prepended (`go style best practices > error handling > … \n\n <content>`), so the vectors
+  encode where the chunk sits; the **stored** document stays the raw content. Practical upshot:
+  **headings are retrieval metadata** — descriptive, well-nested `#/##/###` headings produce
+  better breadcrumbs (generic ones like *Overview*/*Notes* add no signal). No special file
+  format is needed beyond clean heading hygiene.
 - **Search** — the query is embedded, Qdrant runs a hybrid ANN over dense + sparse and fuses
   the two with **Reciprocal Rank Fusion (RRF)**, then a **cross-encoder reranker** reorders the
   candidate pool (`-pool`, default 24) down to the top-k (default 8). Optional metadata filters

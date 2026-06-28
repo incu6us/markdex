@@ -61,3 +61,29 @@ func (c Chunk) Title() string { return c.title }
 func (c Chunk) HeadingPath() string { return c.headingPath }
 
 func (c Chunk) Content() string { return c.content }
+
+// ContextualText returns the chunk content prefixed with a human-readable
+// breadcrumb of its heading path (contextual retrieval), so the embedding
+// encodes where the chunk sits in the document and the reranker can separate
+// near-identical sections. The stored document keeps Content() only.
+func (c Chunk) ContextualText() string {
+	breadcrumb := humanizeHeadingPath(c.headingPath)
+	if breadcrumb == "" {
+		return c.content
+	}
+	return breadcrumb + "\n\n" + c.content
+}
+
+// humanizeHeadingPath turns a slug heading path ("a/b-c/d") into a readable
+// breadcrumb ("a > b c > d") so the embedding model sees natural words.
+func humanizeHeadingPath(headingPath string) string {
+	headingPath = strings.TrimSpace(headingPath)
+	if headingPath == "" {
+		return ""
+	}
+	segments := strings.Split(headingPath, "/")
+	for i, segment := range segments {
+		segments[i] = strings.ReplaceAll(segment, "-", " ")
+	}
+	return strings.Join(segments, " > ")
+}
