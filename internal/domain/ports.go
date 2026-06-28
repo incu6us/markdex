@@ -11,11 +11,11 @@ type Chunker interface {
 }
 
 type Embedder interface {
-	Embed(ctx context.Context, contents []string) ([]Embedding, error)
-	Dimension() int
+	Embed(ctx context.Context, texts []string, kind EmbedKind) ([]Vectors, error)
 }
 
 type VectorRepository interface {
-	Prepare(ctx context.Context, dimension int) error
+	Prepare(ctx context.Context) error
 	Replace(ctx context.Context, sourceID string, chunks []EmbeddedChunk) error
+	Search(ctx context.Context, query Vectors, topN int, filter Filter) ([]SearchHit, error)
 }

@@ -56,7 +56,7 @@ func NewIngestService(
 }
 
 func (s *IngestService) Ingest(ctx context.Context) (IngestResult, error) {
-	if err := s.repo.Prepare(ctx, s.embedder.Dimension()); err != nil {
+	if err := s.repo.Prepare(ctx); err != nil {
 		return IngestResult{}, err
 	}
 
@@ -109,16 +109,16 @@ func (s *IngestService) embedChunks(ctx context.Context, chunks []domain.Chunk) 
 			contents[i] = chunk.Content()
 		}
 
-		embeddings, err := s.embedder.Embed(ctx, contents)
+		vectors, err := s.embedder.Embed(ctx, contents, domain.DocumentKind)
 		if err != nil {
 			return nil, err
 		}
-		if len(embeddings) != len(batch) {
-			return nil, fmt.Errorf("embedding count mismatch: got %d for %d chunks", len(embeddings), len(batch))
+		if len(vectors) != len(batch) {
+			return nil, fmt.Errorf("embedding count mismatch: got %d for %d chunks", len(vectors), len(batch))
 		}
 
 		for i := range batch {
-			embedded = append(embedded, domain.EmbeddedChunk{Chunk: batch[i], Embedding: embeddings[i]})
+			embedded = append(embedded, domain.EmbeddedChunk{Chunk: batch[i], Vectors: vectors[i]})
 		}
 		s.report(end, total)
 	}

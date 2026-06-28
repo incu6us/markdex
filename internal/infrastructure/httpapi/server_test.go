@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/incu6us/markdex/internal/domain"
 	"github.com/incu6us/markdex/internal/infrastructure/httpapi"
 	"github.com/incu6us/markdex/internal/infrastructure/markdown"
 )
@@ -62,11 +63,27 @@ func (s stubIngester) Ingest(_ context.Context, _ httpapi.IngestSpec, report fun
 	return s.ingested, s.err
 }
 
+type stubSearcher struct {
+	hits          []domain.SearchHit
+	err           error
+	gotCollection string
+	gotQuery      string
+	gotTopK       int
+}
+
+func (s *stubSearcher) Search(_ context.Context, collection, query string, topK int, _ domain.Filter) ([]domain.SearchHit, error) {
+	s.gotCollection = collection
+	s.gotQuery = query
+	s.gotTopK = topK
+	return s.hits, s.err
+}
+
 type testDeps struct {
 	lister   httpapi.CollectionLister
 	creator  httpapi.CollectionCreator
 	fetcher  httpapi.Fetcher
 	ingester httpapi.Ingester
+	searcher httpapi.Searcher
 	model    httpapi.ModelInfo
 }
 
@@ -84,13 +101,14 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 	t.Cleanup(manager.Stop)
 
 	return httpapi.NewServer(httpapi.Config{
-		Chunker: markdown.NewSplitter(2000, 200),
-		Fetcher: deps.fetcher,
-		Lister:  deps.lister,
-		Creator: deps.creator,
-		Jobs:    manager,
-		Model:   deps.model,
-		Logger:  logger,
+		Chunker:  markdown.NewSplitter(2000, 200),
+		Fetcher:  deps.fetcher,
+		Lister:   deps.lister,
+		Creator:  deps.creator,
+		Searcher: deps.searcher,
+		Jobs:     manager,
+		Model:    deps.model,
+		Logger:   logger,
 	}).Handler()
 }
 
@@ -295,6 +313,59 @@ func TestHandleJobNotFound(t *testing.T) {
 	rec := doRequest(t, newTestServer(t, testDeps{}), http.MethodGet, "/api/jobs/does-not-exist", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHandleSearch(t *testing.T) {
+	t.Parallel()
+
+	searcher := &stubSearcher{hits: []domain.SearchHit{
+		{ID: "x", Score: 0.9, Document: "doc x", Metadata: map[string]string{"title": "Naming"}},
+	}}
+	handler := newTestServer(t, testDeps{searcher: searcher})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/search", map[string]any{
+		"collection": "go-guide", "query": "how to name things", "top_k": 5,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+
+	resp := decodeBody[struct {
+		Results []struct {
+			ID       string            `json:"id"`
+			Score    float32           `json:"score"`
+			Document string            `json:"document"`
+			Metadata map[string]string `json:"metadata"`
+		} `json:"results"`
+	}](t, rec)
+
+	if len(resp.Results) != 1 || resp.Results[0].ID != "x" || resp.Results[0].Metadata["title"] != "Naming" {
+		t.Fatalf("results = %+v", resp.Results)
+	}
+	if searcher.gotCollection != "go-guide" || searcher.gotQuery != "how to name things" || searcher.gotTopK != 5 {
+		t.Fatalf("searcher got collection=%q query=%q topK=%d", searcher.gotCollection, searcher.gotQuery, searcher.gotTopK)
+	}
+}
+
+func TestHandleSearchValidation(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{searcher: &stubSearcher{}})
+	rec := doRequest(t, handler, http.MethodPost, "/api/search", map[string]any{"query": "no collection"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestHandleSearchDefaultsTopK(t *testing.T) {
+	t.Parallel()
+
+	searcher := &stubSearcher{}
+	handler := newTestServer(t, testDeps{searcher: searcher})
+	doRequest(t, handler, http.MethodPost, "/api/search", map[string]any{"collection": "c", "query": "q"})
+	if searcher.gotTopK != 8 {
+		t.Fatalf("default top_k = %d, want 8", searcher.gotTopK)
 	}
 }
 

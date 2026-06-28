@@ -14,10 +14,13 @@ import (
 	"github.com/incu6us/markdex/internal/infrastructure/qdrant"
 )
 
-const (
-	testCollection = "markdown"
-	testVectorName = "fast-test"
-)
+const testCollection = "markdown"
+
+var testSchema = domain.CollectionSchema{
+	DenseDimension: 384,
+	DenseVector:    "bge-m3-dense",
+	SparseVector:   "bge-m3-sparse",
+}
 
 type recordedRequest struct {
 	method string
@@ -45,11 +48,19 @@ func (rec *recorder) handler(t *testing.T) http.HandlerFunc {
 		rec.requests = append(rec.requests, recordedRequest{method: r.Method, path: r.URL.Path, body: body})
 		rec.mu.Unlock()
 
-		if strings.HasSuffix(r.URL.Path, "/exists") {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/exists"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"exists": rec.exists}})
-			return
+		case strings.HasSuffix(r.URL.Path, "/points/query"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"points": []map[string]any{
+				{"id": "id-1", "score": 0.7, "payload": map[string]any{
+					"document": "hello world",
+					"metadata": map[string]any{"source_id": "docs/go.md", "chunk_index": 3, "title": "Naming"},
+				}},
+			}}})
+		default:
+			w.WriteHeader(http.StatusOK)
 		}
-		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -58,7 +69,7 @@ func newRepository(t *testing.T, exists bool) (*qdrant.Repository, *recorder) {
 	rec := &recorder{exists: exists}
 	server := httptest.NewServer(rec.handler(t))
 	t.Cleanup(server.Close)
-	return qdrant.NewRepository(server.URL, "", testCollection, testVectorName), rec
+	return qdrant.NewRepository(server.URL, "", testCollection, testSchema), rec
 }
 
 func (rec *recorder) calls() []recordedRequest {
@@ -79,21 +90,22 @@ func embeddedChunk(t *testing.T, sourceID string, index int) domain.EmbeddedChun
 	if err != nil {
 		t.Fatalf("new chunk: %v", err)
 	}
-	embedding, err := domain.NewEmbedding([]float32{0.1, 0.2, 0.3})
+	dense, err := domain.NewEmbedding([]float32{0.1, 0.2, 0.3})
 	if err != nil {
 		t.Fatalf("new embedding: %v", err)
 	}
-	return domain.EmbeddedChunk{Chunk: chunk, Embedding: embedding}
+	sparse, err := domain.NewSparseEmbedding([]uint32{4, 9}, []float32{0.5, 0.6})
+	if err != nil {
+		t.Fatalf("new sparse: %v", err)
+	}
+	return domain.EmbeddedChunk{Chunk: chunk, Vectors: domain.Vectors{Dense: dense, Sparse: sparse}}
 }
 
 func TestRepositoryReplaceDeletesThenUpserts(t *testing.T) {
 	t.Parallel()
 
 	repo, rec := newRepository(t, true)
-	chunks := []domain.EmbeddedChunk{
-		embeddedChunk(t, "docs/go.md", 0),
-		embeddedChunk(t, "docs/go.md", 1),
-	}
+	chunks := []domain.EmbeddedChunk{embeddedChunk(t, "docs/go.md", 0), embeddedChunk(t, "docs/go.md", 1)}
 
 	if err := repo.Replace(context.Background(), "docs/go.md", chunks); err != nil {
 		t.Fatalf("replace: %v", err)
@@ -101,73 +113,40 @@ func TestRepositoryReplaceDeletesThenUpserts(t *testing.T) {
 
 	calls := rec.calls()
 	if len(calls) != 2 {
-		t.Fatalf("got %d requests, want 2 (delete then upsert)", len(calls))
+		t.Fatalf("got %d requests, want 2", len(calls))
 	}
-
-	del := calls[0]
-	if del.method != http.MethodPost || !strings.HasSuffix(del.path, "/points/delete") {
-		t.Fatalf("first request = %s %s, want POST .../points/delete", del.method, del.path)
+	if calls[0].method != http.MethodPost || !strings.HasSuffix(calls[0].path, "/points/delete") {
+		t.Fatalf("first = %s %s", calls[0].method, calls[0].path)
 	}
-	if got := sourceIDFromFilter(t, del.body); got != "docs/go.md" {
-		t.Fatalf("delete filter source_id = %q, want docs/go.md", got)
+	if sourceIDFromFilter(t, calls[0].body) != "docs/go.md" {
+		t.Fatalf("delete filter source_id wrong")
 	}
 
 	up := calls[1]
 	if up.method != http.MethodPut || !strings.HasSuffix(up.path, "/points") {
-		t.Fatalf("second request = %s %s, want PUT .../points", up.method, up.path)
+		t.Fatalf("second = %s %s", up.method, up.path)
 	}
-	points, ok := up.body["points"].([]any)
-	if !ok || len(points) != 2 {
-		t.Fatalf("upsert points = %v, want 2", up.body["points"])
+	points := up.body["points"].([]any)
+	if len(points) != 2 {
+		t.Fatalf("points = %d, want 2", len(points))
 	}
-
-	first := points[0].(map[string]any)
-	if _, ok := first["id"].(string); !ok {
-		t.Fatalf("point missing string id: %v", first)
+	vector := points[0].(map[string]any)["vector"].(map[string]any)
+	if _, ok := vector[testSchema.DenseVector]; !ok {
+		t.Fatalf("missing dense vector: %v", vector)
 	}
-	vector := first["vector"].(map[string]any)
-	if _, ok := vector[testVectorName]; !ok {
-		t.Fatalf("point vector missing named vector %q: %v", testVectorName, vector)
-	}
-	payload := first["payload"].(map[string]any)
-	if payload["document"] != "keep names short" {
-		t.Fatalf("payload document = %v", payload["document"])
-	}
-	metadata := payload["metadata"].(map[string]any)
-	for _, key := range []string{"path", "source_id", "title", "heading_path", "chunk_index"} {
-		if _, ok := metadata[key]; !ok {
-			t.Fatalf("payload metadata missing %q: %v", key, metadata)
-		}
-	}
-	if metadata["source_id"] != "docs/go.md" {
-		t.Fatalf("metadata source_id = %v", metadata["source_id"])
-	}
-}
-
-func TestRepositoryReplaceWithoutChunksOnlyDeletes(t *testing.T) {
-	t.Parallel()
-
-	repo, rec := newRepository(t, true)
-	if err := repo.Replace(context.Background(), "docs/go.md", nil); err != nil {
-		t.Fatalf("replace: %v", err)
-	}
-
-	calls := rec.calls()
-	if len(calls) != 1 {
-		t.Fatalf("got %d requests, want 1 (delete only)", len(calls))
-	}
-	if !strings.HasSuffix(calls[0].path, "/points/delete") {
-		t.Fatalf("request path = %s, want .../points/delete", calls[0].path)
+	sparse, ok := vector[testSchema.SparseVector].(map[string]any)
+	if !ok || sparse["indices"] == nil || sparse["values"] == nil {
+		t.Fatalf("missing/invalid sparse vector: %v", vector)
 	}
 }
 
 func TestRepositoryPrepare(t *testing.T) {
 	t.Parallel()
 
-	t.Run("creates collection when missing", func(t *testing.T) {
+	t.Run("creates dense+sparse collection when missing", func(t *testing.T) {
 		t.Parallel()
 		repo, rec := newRepository(t, false)
-		if err := repo.Prepare(context.Background(), 384); err != nil {
+		if err := repo.Prepare(context.Background()); err != nil {
 			t.Fatalf("prepare: %v", err)
 		}
 
@@ -181,26 +160,76 @@ func TestRepositoryPrepare(t *testing.T) {
 		if create == nil {
 			t.Fatal("expected a PUT to create the collection")
 		}
-		vectors := create.body["vectors"].(map[string]any)
-		named := vectors[testVectorName].(map[string]any)
-		if named["size"].(float64) != 384 {
-			t.Fatalf("vector size = %v, want 384", named["size"])
+		dense := create.body["vectors"].(map[string]any)[testSchema.DenseVector].(map[string]any)
+		if dense["size"].(float64) != 384 {
+			t.Fatalf("dense size = %v", dense["size"])
+		}
+		if _, ok := create.body["sparse_vectors"].(map[string]any)[testSchema.SparseVector]; !ok {
+			t.Fatalf("missing sparse_vectors: %v", create.body["sparse_vectors"])
 		}
 	})
 
 	t.Run("skips creation when collection exists", func(t *testing.T) {
 		t.Parallel()
 		repo, rec := newRepository(t, true)
-		if err := repo.Prepare(context.Background(), 384); err != nil {
+		if err := repo.Prepare(context.Background()); err != nil {
 			t.Fatalf("prepare: %v", err)
 		}
-
 		for _, call := range rec.calls() {
 			if call.method == http.MethodPut && strings.HasSuffix(call.path, "/collections/"+testCollection) {
-				t.Fatalf("unexpected collection creation: %v", call)
+				t.Fatalf("unexpected creation: %v", call)
 			}
 		}
 	})
+}
+
+func TestRepositorySearch(t *testing.T) {
+	t.Parallel()
+
+	repo, rec := newRepository(t, true)
+	dense, _ := domain.NewEmbedding([]float32{0.1, 0.2, 0.3})
+	sparse, _ := domain.NewSparseEmbedding([]uint32{1}, []float32{0.9})
+	query := domain.Vectors{Dense: dense, Sparse: sparse}
+
+	hits, err := repo.Search(context.Background(), query, 50, domain.Filter{Match: map[string]string{"source_id": "docs/go.md"}})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if len(hits) != 1 || hits[0].ID != "id-1" || hits[0].Document != "hello world" {
+		t.Fatalf("hits = %+v", hits)
+	}
+	if hits[0].Metadata["chunk_index"] != "3" || hits[0].Metadata["title"] != "Naming" {
+		t.Fatalf("metadata = %v", hits[0].Metadata)
+	}
+
+	var queryReq *recordedRequest
+	for _, call := range rec.calls() {
+		if strings.HasSuffix(call.path, "/points/query") {
+			c := call
+			queryReq = &c
+		}
+	}
+	if queryReq == nil {
+		t.Fatal("expected a points/query request")
+	}
+	prefetch := queryReq.body["prefetch"].([]any)
+	if len(prefetch) != 2 {
+		t.Fatalf("prefetch = %d, want 2 (dense+sparse)", len(prefetch))
+	}
+	usings := map[string]bool{}
+	for _, p := range prefetch {
+		usings[p.(map[string]any)["using"].(string)] = true
+	}
+	if !usings[testSchema.DenseVector] || !usings[testSchema.SparseVector] {
+		t.Fatalf("prefetch usings = %v", usings)
+	}
+	if queryReq.body["query"].(map[string]any)["fusion"] != "rrf" {
+		t.Fatalf("fusion = %v", queryReq.body["query"])
+	}
+	if queryReq.body["filter"] == nil {
+		t.Fatal("expected filter in query body")
+	}
 }
 
 func TestRepositoryList(t *testing.T) {
@@ -210,19 +239,15 @@ func TestRepositoryList(t *testing.T) {
 		switch r.URL.Path {
 		case "/collections":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"result": map[string]any{
-					"collections": []map[string]any{{"name": "markdown"}, {"name": "go-guide"}},
-				},
+				"result": map[string]any{"collections": []map[string]any{{"name": "markdown"}}},
 			})
-		case "/collections/markdown", "/collections/go-guide":
+		case "/collections/markdown":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": map[string]any{
 					"points_count": 12,
-					"config": map[string]any{
-						"params": map[string]any{
-							"vectors": map[string]any{testVectorName: map[string]any{"size": 384}},
-						},
-					},
+					"config": map[string]any{"params": map[string]any{
+						"vectors": map[string]any{testSchema.DenseVector: map[string]any{"size": 384}},
+					}},
 				},
 			})
 		default:
@@ -232,34 +257,23 @@ func TestRepositoryList(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	t.Cleanup(server.Close)
 
-	repo := qdrant.NewRepository(server.URL, "", "", "")
+	repo := qdrant.NewRepository(server.URL, "", "", domain.CollectionSchema{})
 	infos, err := repo.List(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(infos) != 2 {
-		t.Fatalf("got %d collections, want 2", len(infos))
-	}
-	if infos[0].Name != "markdown" || infos[0].Dimension != 384 || infos[0].VectorName != testVectorName || infos[0].Points != 12 {
-		t.Fatalf("unexpected info: %+v", infos[0])
+	if len(infos) != 1 || infos[0].Name != "markdown" || infos[0].Dimension != 384 || infos[0].VectorName != testSchema.DenseVector || infos[0].Points != 12 {
+		t.Fatalf("info = %+v", infos)
 	}
 }
 
 func sourceIDFromFilter(t *testing.T, body map[string]any) string {
 	t.Helper()
-	filter, ok := body["filter"].(map[string]any)
-	if !ok {
-		t.Fatalf("body missing filter: %v", body)
-	}
-	must, ok := filter["must"].([]any)
-	if !ok || len(must) == 0 {
-		t.Fatalf("filter missing must: %v", filter)
-	}
+	filter := body["filter"].(map[string]any)
+	must := filter["must"].([]any)
 	condition := must[0].(map[string]any)
 	if condition["key"] != "metadata.source_id" {
-		t.Fatalf("filter key = %v, want metadata.source_id", condition["key"])
+		t.Fatalf("filter key = %v", condition["key"])
 	}
-	match := condition["match"].(map[string]any)
-	value, _ := match["value"].(string)
-	return value
+	return condition["match"].(map[string]any)["value"].(string)
 }

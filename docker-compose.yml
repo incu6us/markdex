@@ -7,19 +7,25 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
 
+  embedder:
+    build: ./services/embedder
+    restart: unless-stopped
+    volumes:
+      # persists the BGE-M3 + reranker models (~4.5GB, downloaded on first start)
+      - hf_cache:/root/.cache/huggingface
+
   app:
     build: .
     restart: unless-stopped
     depends_on:
       - qdrant
+      - embedder
     environment:
       QDRANT_URL: http://qdrant:6333
+      EMBEDDER_URL: http://embedder:8000
     ports:
       - "4334:4334"
-    volumes:
-      # persists the ~77MB embedding model across restarts (downloaded on first ingest)
-      - model_cache:/app/model_cache
 
 volumes:
   qdrant_storage:
-  model_cache:
+  hf_cache:

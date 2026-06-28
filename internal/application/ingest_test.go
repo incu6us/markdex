@@ -31,32 +31,37 @@ type fakeEmbedder struct {
 	dimension int
 }
 
-func (f *fakeEmbedder) Dimension() int { return f.dimension }
-
-func (f *fakeEmbedder) Embed(_ context.Context, contents []string) ([]domain.Embedding, error) {
-	embeddings := make([]domain.Embedding, len(contents))
-	for i := range contents {
-		embedding, err := domain.NewEmbedding(make([]float32, f.dimension))
+func (f *fakeEmbedder) Embed(_ context.Context, texts []string, _ domain.EmbedKind) ([]domain.Vectors, error) {
+	vectors := make([]domain.Vectors, len(texts))
+	for i := range texts {
+		dense, err := domain.NewEmbedding(make([]float32, f.dimension))
 		if err != nil {
 			return nil, err
 		}
-		embeddings[i] = embedding
+		sparse, err := domain.NewSparseEmbedding([]uint32{1}, []float32{0.5})
+		if err != nil {
+			return nil, err
+		}
+		vectors[i] = domain.Vectors{Dense: dense, Sparse: sparse}
 	}
-	return embeddings, nil
+	return vectors, nil
 }
 
 type fakeRepository struct {
-	preparedDimension int
-	bySource          map[string][]domain.EmbeddedChunk
-	replaceCalls      int
+	prepared     bool
+	bySource     map[string][]domain.EmbeddedChunk
+	replaceCalls int
+	searchHits   []domain.SearchHit
+	searchErr    error
+	searchTopN   int
 }
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{bySource: map[string][]domain.EmbeddedChunk{}}
 }
 
-func (r *fakeRepository) Prepare(_ context.Context, dimension int) error {
-	r.preparedDimension = dimension
+func (r *fakeRepository) Prepare(context.Context) error {
+	r.prepared = true
 	return nil
 }
 
@@ -64,6 +69,11 @@ func (r *fakeRepository) Replace(_ context.Context, sourceID string, chunks []do
 	r.bySource[sourceID] = chunks
 	r.replaceCalls++
 	return nil
+}
+
+func (r *fakeRepository) Search(_ context.Context, _ domain.Vectors, topN int, _ domain.Filter) ([]domain.SearchHit, error) {
+	r.searchTopN = topN
+	return r.searchHits, r.searchErr
 }
 
 func (r *fakeRepository) stored() int {
@@ -148,8 +158,8 @@ func TestIngestServiceIngestChunks(t *testing.T) {
 			if repo.stored() != want {
 				t.Errorf("stored = %d, want %d", repo.stored(), want)
 			}
-			if repo.preparedDimension != dimension {
-				t.Errorf("prepared dimension = %d, want %d", repo.preparedDimension, dimension)
+			if !repo.prepared {
+				t.Error("expected Prepare to be called")
 			}
 		})
 	}

@@ -1,0 +1,85 @@
+package application_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/incu6us/markdex/internal/application"
+	"github.com/incu6us/markdex/internal/domain"
+)
+
+type fakeReranker struct {
+	rerank func(query string, documents []string, topK int) ([]domain.Ranked, error)
+}
+
+func (f *fakeReranker) Rerank(_ context.Context, query string, documents []string, topK int) ([]domain.Ranked, error) {
+	return f.rerank(query, documents, topK)
+}
+
+func TestSearchServiceReranksCandidates(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	repo.searchHits = []domain.SearchHit{
+		{ID: "a", Score: 0.1, Document: "doc a"},
+		{ID: "b", Score: 0.2, Document: "doc b"},
+		{ID: "c", Score: 0.3, Document: "doc c"},
+	}
+	// Reranker reverses the ANN order and assigns new scores, keeping top 2.
+	reranker := &fakeReranker{rerank: func(_ string, documents []string, topK int) ([]domain.Ranked, error) {
+		if len(documents) != 3 {
+			t.Fatalf("reranker got %d documents, want 3", len(documents))
+		}
+		ranked := []domain.Ranked{{Index: 2, Score: 0.99}, {Index: 1, Score: 0.88}, {Index: 0, Score: 0.05}}
+		return ranked[:topK], nil
+	}}
+
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+	hits, err := service.Search(context.Background(), "q", 2, domain.Filter{})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if repo.searchTopN != 50 {
+		t.Fatalf("repo searched with topN=%d, want 50 (pool size)", repo.searchTopN)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("got %d hits, want 2 (topK)", len(hits))
+	}
+	if hits[0].ID != "c" || hits[0].Score != 0.99 {
+		t.Fatalf("hit[0] = %+v, want c with rerank score 0.99", hits[0])
+	}
+	if hits[1].ID != "b" {
+		t.Fatalf("hit[1] = %+v, want b", hits[1])
+	}
+}
+
+func TestSearchServiceEmptyCandidates(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository() // no searchHits
+	reranker := &fakeReranker{rerank: func(string, []string, int) ([]domain.Ranked, error) {
+		t.Fatal("reranker should not be called with no candidates")
+		return nil, nil
+	}}
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+
+	hits, err := service.Search(context.Background(), "q", 5, domain.Filter{})
+	if err != nil || hits != nil {
+		t.Fatalf("got %v / %v, want nil/nil", hits, err)
+	}
+}
+
+func TestSearchServicePropagatesSearchError(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	repo.searchErr = errors.New("qdrant down")
+	reranker := &fakeReranker{rerank: func(string, []string, int) ([]domain.Ranked, error) { return nil, nil }}
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+
+	if _, err := service.Search(context.Background(), "q", 5, domain.Filter{}); !errors.Is(err, repo.searchErr) {
+		t.Fatalf("err = %v, want %v", err, repo.searchErr)
+	}
+}

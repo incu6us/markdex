@@ -22,21 +22,21 @@ type Repository struct {
 	baseURL    string
 	apiKey     string
 	collection string
-	vectorName string
+	schema     domain.CollectionSchema
 	client     *http.Client
 }
 
-func NewRepository(baseURL, apiKey, collection, vectorName string) *Repository {
+func NewRepository(baseURL, apiKey, collection string, schema domain.CollectionSchema) *Repository {
 	return &Repository{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		apiKey:     apiKey,
 		collection: collection,
-		vectorName: vectorName,
+		schema:     schema,
 		client:     &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-func (r *Repository) Prepare(ctx context.Context, dimension int) error {
+func (r *Repository) Prepare(ctx context.Context) error {
 	exists, err := r.collectionExists(ctx)
 	if err != nil {
 		return fmt.Errorf("prepare collection %q: %w", r.collection, err)
@@ -47,16 +47,130 @@ func (r *Repository) Prepare(ctx context.Context, dimension int) error {
 
 	body := map[string]any{
 		"vectors": map[string]any{
-			r.vectorName: map[string]any{
-				"size":     dimension,
+			r.schema.DenseVector: map[string]any{
+				"size":     r.schema.DenseDimension,
 				"distance": "Cosine",
 			},
+		},
+		"sparse_vectors": map[string]any{
+			r.schema.SparseVector: map[string]any{},
 		},
 	}
 	if err := r.do(ctx, http.MethodPut, "/collections/"+r.collection, body, nil); err != nil {
 		return fmt.Errorf("prepare collection %q: %w", r.collection, err)
 	}
 	return nil
+}
+
+func (r *Repository) Replace(ctx context.Context, sourceID string, chunks []domain.EmbeddedChunk) error {
+	if err := r.deleteBySource(ctx, sourceID); err != nil {
+		return fmt.Errorf("replace source %q in %q: %w", sourceID, r.collection, err)
+	}
+	if len(chunks) == 0 {
+		return nil
+	}
+
+	points := make([]map[string]any, 0, len(chunks))
+	for _, ec := range chunks {
+		chunk := ec.Chunk
+		points = append(points, map[string]any{
+			"id": chunk.ID(),
+			"vector": map[string]any{
+				r.schema.DenseVector: ec.Vectors.Dense.Vector(),
+				r.schema.SparseVector: map[string]any{
+					"indices": ec.Vectors.Sparse.Indices(),
+					"values":  ec.Vectors.Sparse.Values(),
+				},
+			},
+			"payload": map[string]any{
+				"document": chunk.Content(),
+				"metadata": map[string]any{
+					"path":         chunk.SourceID(),
+					"source_id":    chunk.SourceID(),
+					"title":        chunk.Title(),
+					"heading_path": chunk.HeadingPath(),
+					"chunk_index":  chunk.Index(),
+				},
+			},
+		})
+	}
+
+	body := map[string]any{"points": points}
+	path := "/collections/" + r.collection + "/points?wait=true"
+	if err := r.do(ctx, http.MethodPut, path, body, nil); err != nil {
+		return fmt.Errorf("save %d points into %q: %w", len(chunks), r.collection, err)
+	}
+	return nil
+}
+
+func (r *Repository) Search(ctx context.Context, query domain.Vectors, topN int, filter domain.Filter) ([]domain.SearchHit, error) {
+	if topN < 1 {
+		topN = 10
+	}
+
+	body := map[string]any{
+		"prefetch": []map[string]any{
+			{"query": query.Dense.Vector(), "using": r.schema.DenseVector, "limit": topN},
+			{
+				"query": map[string]any{"indices": query.Sparse.Indices(), "values": query.Sparse.Values()},
+				"using": r.schema.SparseVector,
+				"limit": topN,
+			},
+		},
+		"query":        map[string]any{"fusion": "rrf"},
+		"limit":        topN,
+		"with_payload": true,
+	}
+	if !filter.IsEmpty() {
+		body["filter"] = buildFilter(filter)
+	}
+
+	var out struct {
+		Result struct {
+			Points []struct {
+				ID      any     `json:"id"`
+				Score   float32 `json:"score"`
+				Payload struct {
+					Document string         `json:"document"`
+					Metadata map[string]any `json:"metadata"`
+				} `json:"payload"`
+			} `json:"points"`
+		} `json:"result"`
+	}
+	path := "/collections/" + r.collection + "/points/query"
+	if err := r.do(ctx, http.MethodPost, path, body, &out); err != nil {
+		return nil, fmt.Errorf("search %q: %w", r.collection, err)
+	}
+
+	hits := make([]domain.SearchHit, 0, len(out.Result.Points))
+	for _, point := range out.Result.Points {
+		hits = append(hits, domain.SearchHit{
+			ID:       fmt.Sprintf("%v", point.ID),
+			Score:    point.Score,
+			Document: point.Payload.Document,
+			Metadata: stringifyMetadata(point.Payload.Metadata),
+		})
+	}
+	return hits, nil
+}
+
+func buildFilter(filter domain.Filter) map[string]any {
+	must := make([]map[string]any, 0, len(filter.Match))
+	for key, value := range filter.Match {
+		must = append(must, map[string]any{
+			"key":   "metadata." + key,
+			"match": map[string]any{"value": value},
+		})
+	}
+	return map[string]any{"must": must}
+}
+
+func stringifyMetadata(metadata map[string]any) map[string]string {
+	out := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		out[key] = fmt.Sprintf("%v", value)
+	}
+	return out
 }
 
 type CollectionInfo struct {
@@ -125,41 +239,6 @@ func (r *Repository) collectionExists(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return out.Result.Exists, nil
-}
-
-func (r *Repository) Replace(ctx context.Context, sourceID string, chunks []domain.EmbeddedChunk) error {
-	if err := r.deleteBySource(ctx, sourceID); err != nil {
-		return fmt.Errorf("replace source %q in %q: %w", sourceID, r.collection, err)
-	}
-	if len(chunks) == 0 {
-		return nil
-	}
-
-	points := make([]map[string]any, 0, len(chunks))
-	for _, ec := range chunks {
-		chunk := ec.Chunk
-		points = append(points, map[string]any{
-			"id":     chunk.ID(),
-			"vector": map[string]any{r.vectorName: ec.Embedding.Vector()},
-			"payload": map[string]any{
-				"document": chunk.Content(),
-				"metadata": map[string]any{
-					"path":         chunk.SourceID(),
-					"source_id":    chunk.SourceID(),
-					"title":        chunk.Title(),
-					"heading_path": chunk.HeadingPath(),
-					"chunk_index":  chunk.Index(),
-				},
-			},
-		})
-	}
-
-	body := map[string]any{"points": points}
-	path := "/collections/" + r.collection + "/points?wait=true"
-	if err := r.do(ctx, http.MethodPut, path, body, nil); err != nil {
-		return fmt.Errorf("save %d points into %q: %w", len(chunks), r.collection, err)
-	}
-	return nil
 }
 
 func (r *Repository) deleteBySource(ctx context.Context, sourceID string) error {

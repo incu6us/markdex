@@ -15,7 +15,7 @@ import (
 
 	"github.com/incu6us/markdex/internal/application"
 	"github.com/incu6us/markdex/internal/domain"
-	"github.com/incu6us/markdex/internal/infrastructure/fastembed"
+	"github.com/incu6us/markdex/internal/infrastructure/embedderclient"
 	"github.com/incu6us/markdex/internal/infrastructure/github"
 	"github.com/incu6us/markdex/internal/infrastructure/httpapi"
 	"github.com/incu6us/markdex/internal/infrastructure/markdown"
@@ -25,6 +25,7 @@ import (
 const (
 	embedderMaxChars = 2000
 	defaultOverlap   = 200
+	searchPoolSize   = 50
 )
 
 //go:embed all:web/dist
@@ -32,53 +33,74 @@ var webDist embed.FS
 
 func main() {
 	qdrantURL := flag.String("qdrant", envOr("QDRANT_URL", "http://localhost:6333"), "Qdrant REST base URL")
-	cacheDir := flag.String("cache", "model_cache", "directory to cache the embedding model")
+	embedderURL := flag.String("embedder", envOr("EMBEDDER_URL", "http://localhost:8000"), "embedder sidecar base URL")
 	addr := flag.String("addr", ":4334", "HTTP listen address")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	log.Printf("loading embedding model (cache=%s)...", *cacheDir)
-	embedder, err := fastembed.New(*cacheDir, embedderMaxChars)
-	if err != nil {
-		log.Fatalf("load model: %v", err)
-	}
-	defer embedder.Close()
-	log.Printf("model ready, vector dimension=%d", embedder.Dimension())
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder); err != nil {
+	embedder := embedderclient.New(*embedderURL)
+	info, err := waitForEmbedder(ctx, embedder, logger)
+	if err != nil {
+		log.Fatalf("embedder sidecar not ready: %v", err)
+	}
+	logger.Info("embedder ready", "model", info.EmbedModel, "dimension", info.DenseDim)
+
+	schema := domain.CollectionSchema{
+		DenseDimension: info.DenseDim,
+		DenseVector:    info.DenseName,
+		SparseVector:   info.SparseName,
+	}
+	model := httpapi.ModelInfo{Dimension: info.DenseDim, VectorName: info.DenseName}
+
+	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder, schema, model, logger); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
 
-func serveAPI(ctx context.Context, addr, qdrantURL, apiKey string, embedder *fastembed.Embedder) error {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	var ui fs.FS
-	if dist, err := fs.Sub(webDist, "web/dist"); err == nil {
-		if _, statErr := fs.Stat(dist, "index.html"); statErr == nil {
-			ui = dist
-		} else {
-			logger.Warn("embedded web UI not built; serving API only (run `make ui-build`)")
+func waitForEmbedder(ctx context.Context, embedder *embedderclient.Client, logger *slog.Logger) (embedderclient.Info, error) {
+	deadline := time.Now().Add(5 * time.Minute)
+	for {
+		if err := embedder.Ready(ctx); err == nil {
+			return embedder.Info(ctx)
+		} else if time.Now().After(deadline) {
+			return embedderclient.Info{}, err
+		}
+		logger.Info("waiting for embedder sidecar to load models...")
+		select {
+		case <-ctx.Done():
+			return embedderclient.Info{}, ctx.Err()
+		case <-time.After(3 * time.Second):
 		}
 	}
+}
 
-	ingester := &chunkIngester{embedder: embedder, qdrantURL: qdrantURL, apiKey: apiKey}
+func serveAPI(
+	ctx context.Context,
+	addr, qdrantURL, apiKey string,
+	embedder *embedderclient.Client,
+	schema domain.CollectionSchema,
+	model httpapi.ModelInfo,
+	logger *slog.Logger,
+) error {
+	ingester := &chunkIngester{embedder: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
 	manager := httpapi.NewJobManager(ingester, logger)
 	manager.Start()
 	defer manager.Stop()
 
-	model := httpapi.ModelInfo{Dimension: embedder.Dimension(), VectorName: embedder.VectorName()}
 	server := httpapi.NewServer(httpapi.Config{
-		Chunker: markdown.NewSplitter(embedderMaxChars, defaultOverlap),
-		Fetcher: github.NewFetcher(),
-		Lister:  &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", "")},
-		Creator: &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, model: model},
-		Jobs:    manager,
-		Model:   model,
-		UI:      ui,
-		Logger:  logger,
+		Chunker:  markdown.NewSplitter(embedderMaxChars, defaultOverlap),
+		Fetcher:  github.NewFetcher(),
+		Lister:   &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
+		Creator:  &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Jobs:     manager,
+		Model:    model,
+		UI:       embeddedUI(logger),
+		Logger:   logger,
 	})
 
 	httpServer := &http.Server{
@@ -106,10 +128,23 @@ func serveAPI(ctx context.Context, addr, qdrantURL, apiKey string, embedder *fas
 	}
 }
 
+func embeddedUI(logger *slog.Logger) fs.FS {
+	dist, err := fs.Sub(webDist, "web/dist")
+	if err != nil {
+		return nil
+	}
+	if _, err := fs.Stat(dist, "index.html"); err != nil {
+		logger.Warn("embedded web UI not built; serving API only (run `make ui-build`)")
+		return nil
+	}
+	return dist
+}
+
 type chunkIngester struct {
-	embedder  *fastembed.Embedder
+	embedder  domain.Embedder
 	qdrantURL string
 	apiKey    string
+	schema    domain.CollectionSchema
 }
 
 func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, report func(processed, total int)) (int, error) {
@@ -129,7 +164,7 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 
 	source := documentSource{documents: []domain.Document{document}}
 	chunker := markdown.NewSplitter(maxChars, overlap)
-	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, spec.Collection, c.embedder.VectorName())
+	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, spec.Collection, c.schema)
 	service := application.NewIngestService(source, chunker, c.embedder, repo, 16, application.WithProgress(report))
 
 	result, err := service.Ingest(ctx)
@@ -137,6 +172,20 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 		return 0, err
 	}
 	return result.Ingested, nil
+}
+
+type chunkSearcher struct {
+	embedder  domain.Embedder
+	reranker  domain.Reranker
+	qdrantURL string
+	apiKey    string
+	schema    domain.CollectionSchema
+}
+
+func (s *chunkSearcher) Search(ctx context.Context, collection, query string, topK int, filter domain.Filter) ([]domain.SearchHit, error) {
+	repo := qdrant.NewRepository(s.qdrantURL, s.apiKey, collection, s.schema)
+	service := application.NewSearchService(s.embedder, repo, s.reranker, searchPoolSize)
+	return service.Search(ctx, query, topK, filter)
 }
 
 type documentSource struct {
@@ -150,12 +199,12 @@ func (d documentSource) Load(context.Context) ([]domain.Document, error) {
 type collectionCreator struct {
 	qdrantURL string
 	apiKey    string
-	model     httpapi.ModelInfo
+	schema    domain.CollectionSchema
 }
 
 func (c *collectionCreator) Create(ctx context.Context, name string) error {
-	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, name, c.model.VectorName)
-	return repo.Prepare(ctx, c.model.Dimension)
+	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, name, c.schema)
+	return repo.Prepare(ctx)
 }
 
 type collectionLister struct {

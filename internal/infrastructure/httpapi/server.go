@@ -24,25 +24,27 @@ type Fetcher interface {
 }
 
 type Config struct {
-	Chunker domain.Chunker
-	Fetcher Fetcher
-	Lister  CollectionLister
-	Creator CollectionCreator
-	Jobs    *JobManager
-	Model   ModelInfo
-	UI      fs.FS
-	Logger  *slog.Logger
+	Chunker  domain.Chunker
+	Fetcher  Fetcher
+	Lister   CollectionLister
+	Creator  CollectionCreator
+	Searcher Searcher
+	Jobs     *JobManager
+	Model    ModelInfo
+	UI       fs.FS
+	Logger   *slog.Logger
 }
 
 type Server struct {
-	chunker domain.Chunker
-	fetcher Fetcher
-	lister  CollectionLister
-	creator CollectionCreator
-	jobs    *JobManager
-	model   ModelInfo
-	ui      fs.FS
-	logger  *slog.Logger
+	chunker  domain.Chunker
+	fetcher  Fetcher
+	lister   CollectionLister
+	creator  CollectionCreator
+	searcher Searcher
+	jobs     *JobManager
+	model    ModelInfo
+	ui       fs.FS
+	logger   *slog.Logger
 }
 
 func NewServer(cfg Config) *Server {
@@ -51,14 +53,15 @@ func NewServer(cfg Config) *Server {
 		logger = slog.Default()
 	}
 	return &Server{
-		chunker: cfg.Chunker,
-		fetcher: cfg.Fetcher,
-		lister:  cfg.Lister,
-		creator: cfg.Creator,
-		jobs:    cfg.Jobs,
-		model:   cfg.Model,
-		ui:      cfg.UI,
-		logger:  logger,
+		chunker:  cfg.Chunker,
+		fetcher:  cfg.Fetcher,
+		lister:   cfg.Lister,
+		creator:  cfg.Creator,
+		searcher: cfg.Searcher,
+		jobs:     cfg.Jobs,
+		model:    cfg.Model,
+		ui:       cfg.UI,
+		logger:   logger,
 	}
 }
 
@@ -68,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/collections", s.handleCollections)
 	mux.HandleFunc("POST /api/collections", s.handleCreateCollection)
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)
+	mux.HandleFunc("POST /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
 	mux.HandleFunc("GET /api/jobs/{id}/stream", s.handleJobStream)
 	if s.ui != nil {

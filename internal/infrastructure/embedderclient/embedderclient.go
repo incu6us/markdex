@@ -13,7 +13,10 @@ import (
 	"github.com/incu6us/markdex/internal/domain"
 )
 
-var _ domain.Reranker = (*Client)(nil)
+var (
+	_ domain.Embedder = (*Client)(nil)
+	_ domain.Reranker = (*Client)(nil)
+)
 
 type Client struct {
 	baseURL string
@@ -41,6 +44,10 @@ func (c *Client) Info(ctx context.Context) (Info, error) {
 		return Info{}, err
 	}
 	return info, nil
+}
+
+func (c *Client) Ready(ctx context.Context) error {
+	return c.do(ctx, http.MethodGet, "/healthz", nil, nil)
 }
 
 type embedRequest struct {
