@@ -310,6 +310,15 @@ input.topk {
   mask-image: linear-gradient(180deg, #000 75%, transparent);
 }
 
+/* Parent-document retrieval (expand) returns the full section — show it all
+   instead of clipping it to the chunk-preview height. */
+.result-doc.full {
+  max-height: none;
+  overflow: visible;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
 textarea.golden {
   width: 100%;
   background: var(--bg);

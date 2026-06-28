@@ -7,6 +7,7 @@ export default function Search({ collections }) {
   const [topK, setTopK] = useState(8)
   const [expand, setExpand] = useState(false)
   const [results, setResults] = useState(null)
+  const [resultsExpanded, setResultsExpanded] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -22,6 +23,7 @@ export default function Search({ collections }) {
     try {
       const data = await search({ collection, query: query.trim(), top_k: Number(topK) || 8, expand })
       setResults(data.results || [])
+      setResultsExpanded(expand)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -86,7 +88,7 @@ export default function Search({ collections }) {
                   <span className="result-score">{r.score.toFixed(3)}</span>
                 </div>
                 {r.metadata?.heading_path && <div className="result-path">{r.metadata.heading_path}</div>}
-                <p className="result-doc">{r.document}</p>
+                <p className={`result-doc${resultsExpanded ? ' full' : ''}`}>{r.document}</p>
               </li>
             ))}
           </ol>
