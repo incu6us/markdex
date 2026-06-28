@@ -15,23 +15,26 @@ The half that determines answer quality. Today retrieval is delegated to the ext
 `mcp-server-qdrant` (`qdrant-find`), which does plain dense kNN with the ingest model.
 markdex has no search endpoint of its own.
 
-- [ ] **`/api/search` endpoint** — a retrieval API markdex owns (query → ranked chunks
-      with scores + metadata), so we control ranking instead of delegating it.
-- [ ] **Hybrid search** — dense + sparse (BM25/SPLADE) via Qdrant named/sparse vectors;
-      catches exact-term matches (API names, identifiers) that pure dense misses.
-- [ ] **Cross-encoder reranking** — rerank top-k candidates; usually the single biggest
-      precision win.
-- [ ] **Query-time metadata filters** — filter by `source_id` / `title` / `heading_path`
-      (Qdrant supports it; just needs to be exposed).
+- [x] **`/api/search` endpoint** — markdex owns retrieval: query → embed → hybrid Qdrant
+      search → rerank → ranked hits with scores + metadata. (sidecar Phases 4–8)
+- [x] **Hybrid search** — dense + sparse (BGE-M3 lexical weights) via Qdrant named/sparse
+      vectors, fused with RRF. Verified live against Qdrant 1.18.2.
+- [x] **Cross-encoder reranking** — `bge-reranker-v2-m3` in the sidecar reorders the
+      candidate pool (pool 50 → top-k 8). Verified live.
+- [x] **Query-time metadata filters** — `filter` map on `/api/search` → Qdrant `must`
+      conditions on `metadata.*`.
 - [ ] **Parent-document retrieval** — match on small chunks, return the larger enclosing
       section to the LLM.
-- [ ] **Keep MCP compatibility** — preserve the `qdrant-find` payload contract while adding
-      the richer search path.
+- [ ] **Expose retrieval as an MCP tool** — the dense vector + model changed (now BGE-M3),
+      so stock `qdrant-find` no longer matches; surface the reranked `/api/search` path to
+      agents via an MCP tool instead.
+- [ ] **Search UI** — a query box in the React app over `/api/search`.
 
 ## Tier 2 — Embedding & chunk quality
 
-- [ ] **Stronger / longer-context embedder** — `bge-small` is 384-dim / 512-token. Evaluate
-      `bge-m3` (dense+sparse+ColBERT, 8k ctx) or Voyage (Anthropic-recommended embeddings).
+- [x] **Stronger / longer-context embedder** — swapped `bge-small` (384-dim/512-token) for
+      **BGE-M3** (1024-dim dense + sparse, 8k context) in the Python embedder sidecar. The Go
+      binary is now pure-Go (no ONNX). (sidecar Phases 1–8)
 - [ ] **Contextual retrieval** — prepend a one-line doc/section context to each chunk before
       embedding (uses existing `title`/`heading_path`); ~35–50% fewer retrieval failures.
 - [ ] **Token-accurate chunk sizing** — replace the rune approximation with real tokenizer

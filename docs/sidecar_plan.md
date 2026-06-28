@@ -141,5 +141,16 @@ Qdrant 1.18.2 supports prefetch + fusion natively.
 - [x] Phase 3 — `embedderclient` (TDD): HTTP client to the sidecar. `Embed` (texts+kind →
       `[]Vectors`), `Rerank` (implements `domain.Reranker`), `Info` (dim/vector names).
       Tested against an `httptest` mock mirroring the real sidecar JSON.
-- [ ] Phase 4 — qdrant: `Prepare`/`Replace`/`Search` for dense+sparse (hybrid, RRF)
-- [ ] Phases 5–10
+- [x] Phases 4–8 — the breaking swap, landed together (TDD): port signatures
+      (`Embedder`/`VectorRepository`/`EmbeddedChunk`), qdrant hybrid `Prepare`/`Replace`/
+      `Search` (dense+sparse, RRF), `IngestService` update, `SearchService`, `POST /api/search`,
+      main wiring (embedder client + schema from `/info` + per-collection search), removed
+      `fastembed`/ONNX, pure-Go `Dockerfile` (distroless), compose `embedder` service.
+- [x] Phase 9 — verification. All Go unit tests green. Each interface verified against its
+      **real** counterpart: embedder `/embed`+`/rerank` (Phase 1, live); the hybrid
+      create/upsert/RRF-query wire shape against **live Qdrant 1.18.2** (200/ok, correct RRF
+      ranking + filter). The simultaneous 3-service run wasn't completed here — loading
+      BGE-M3 + reranker in RAM alongside Qdrant exhausted the local Docker VM. Repro:
+      `make docker-up` on a host with ≥8 GB allocated to Docker, then create a collection,
+      ingest, and `POST /api/search`.
+- [x] Phase 10 — docs (README, roadmap check-offs, this file).
