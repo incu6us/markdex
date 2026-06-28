@@ -9,7 +9,7 @@ cross-encoder reranking** over a REST API.
 Three containers, each with one job:
 
 - **app** (Go) — chunking, ingestion orchestration, search API, and the embedded React UI.
-- **embedder** (Python sidecar) — BGE-M3 embeddings + `bge-reranker-v2-m3` reranking.
+- **embedder** (Python sidecar) — BGE-M3 embeddings + cross-encoder reranking (MiniLM by default).
 - **qdrant** — vector store (dense + sparse named vectors, RRF fusion).
 
 The **React UI** (`web/`) lets you upload a `.md` file or paste a raw GitHub `.md` URL,
@@ -126,8 +126,8 @@ make docker-down    # stop and remove containers/network (ARGS=-v also drops vol
   cosine) *and* a **sparse** lexical vector. Both are stored as named vectors so search can
   fuse semantic similarity with exact-term matching.
 - **Search** — the query is embedded, Qdrant runs a hybrid ANN over dense + sparse and fuses
-  the two with **Reciprocal Rank Fusion (RRF)**, then `bge-reranker-v2-m3` reranks the
-  candidate pool (default 50) down to the top-k (default 8). Optional metadata filters
+  the two with **Reciprocal Rank Fusion (RRF)**, then a **cross-encoder reranker** reorders the
+  candidate pool (`-pool`, default 24) down to the top-k (default 8). Optional metadata filters
   (`source_id` / `title` / `heading_path`) apply at query time.
 - **Idempotent re-ingest** — every point carries `metadata.source_id`. Re-ingesting a file
   does *delete-by-`source_id`* then upsert, so changing a document's headings never leaves
