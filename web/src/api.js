@@ -35,3 +35,11 @@ export function startIngest(payload) {
     body: JSON.stringify(payload),
   })
 }
+
+export function search(payload) {
+  return jsonFetch('/api/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}

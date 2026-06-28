@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { previewSource, listCollections, createCollection, startIngest } from './api.js'
+import Search from './Search.jsx'
 
 const TERMINAL = ['succeeded', 'failed']
 
 export default function App() {
+  const [mode, setMode] = useState('ingest')
   const [sourceType, setSourceType] = useState('upload')
   const [fileName, setFileName] = useState('')
   const [fileContent, setFileContent] = useState('')
@@ -117,11 +119,26 @@ export default function App() {
 
   return (
     <main className="app">
-      <h1>Markdown → Qdrant</h1>
-      <p className="subtitle">Split Markdown on H1 headings and ingest each topic into Qdrant.</p>
+      <h1>markdex</h1>
+      <p className="subtitle">
+        Split Markdown on H1 headings, embed with BGE-M3, and search with hybrid retrieval + reranking.
+      </p>
+
+      <nav className="nav">
+        <button className={mode === 'ingest' ? 'active' : ''} onClick={() => setMode('ingest')}>
+          Ingest
+        </button>
+        <button className={mode === 'search' ? 'active' : ''} onClick={() => setMode('search')}>
+          Search
+        </button>
+      </nav>
 
       {error && <div className="banner error">{error}</div>}
 
+      {mode === 'search' && <Search collections={collections} />}
+
+      {mode === 'ingest' && (
+        <>
       <section className="card">
         <h2>1. Source</h2>
         <div className="tabs">
@@ -225,6 +242,8 @@ export default function App() {
           </div>
         )}
       </section>
+        </>
+      )}
     </main>
   )
 }

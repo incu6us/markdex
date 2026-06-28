@@ -74,12 +74,13 @@ markdex has no search endpoint of its own.
 - [x] Markdown ingestion: structural H1 split → recursive H2/H3 → sliding-window-with-overlap;
       code-fence aware; every chunk fits the model window.
 - [x] Idempotent re-ingest: delete-by-`source_id` then upsert (no orphaned chunks on change).
-- [x] MCP-compatible payload (`document` + `metadata`, named vector `fast-bge-small-en-v1.5`).
+- [x] Payload `document` + `metadata` (`path`, `source_id`, `title`, `heading_path`,
+      `chunk_index`) under named vectors `bge-m3-dense` + `bge-m3-sparse`.
 - [x] Sources: file upload + single raw GitHub `.md` URL (`/blob/`→raw).
-- [x] HTTP API: preview / collections (list + create) / async ingest / job status + SSE.
+- [x] HTTP API: preview / collections (list + create) / async ingest / search / job status + SSE.
 - [x] Collection dim/model pre-check (`409` on mismatch).
-- [x] React UI served from the same origin, embedded into the binary via `//go:embed`.
-- [x] Self-contained binary (`make build`) + Docker Compose (app + Qdrant).
+- [x] React UI served from the same origin, embedded into the Go binary via `//go:embed`.
+- [x] Docker Compose: app (pure-Go) + embedder sidecar (BGE-M3) + Qdrant.
 - [x] Consistent chunking between preview and ingest (shared default `max_chars`/`overlap`).
-- [x] TDD throughout: unit tests against fakes/`httptest`; verified end-to-end against live
-      ONNX + Qdrant.
+- [x] TDD throughout: unit tests against fakes/`httptest`; verified end-to-end against the
+      live 3-service stack (app + BGE-M3 embedder + Qdrant).
