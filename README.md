@@ -10,6 +10,15 @@ GitHub `.md` URL, preview the H1-topic split, and ingest into a new or existing 
 
 ## Quick start
 
+The fastest path is Docker — it brings up the app **and** Qdrant with no native setup:
+
+```sh
+make docker-up      # build the app image + start app and Qdrant → http://localhost:4334
+make docker-down    # stop (add ARGS=-v to also drop the data volumes)
+```
+
+Or run it natively (requires the ONNX Runtime native library):
+
 ```sh
 # 1. native dependency for FastEmbed
 brew install onnxruntime
@@ -36,6 +45,9 @@ on `:4334`. The resulting binary is self-contained (no `web/dist` needed at runt
 | `make run`        | `ui-build`, then run the backend serving API + UI |
 | `make build`      | `ui-build`, then build one self-contained binary → `bin/markdex-$(GOOS)-$(GOARCH)` |
 | `make test`       | `go test ./...` |
+| `make docker-up`  | `docker compose up --build -d` (app + Qdrant) |
+| `make docker-down`| `docker compose down` (`ARGS=-v` also removes volumes) |
+| `make docker-logs`| follow app + Qdrant logs |
 
 Overridable variables: `ADDR` (default `:4334`), `QDRANT_URL`, `QDRANT_VERSION` (default
 `v1.18.2`), `ONNX_PATH`, `GOOS`/`GOARCH`, and `BIN`. Set them inline, e.g.
@@ -46,6 +58,23 @@ the web UI — is baked in.
 
 > For UI development with hot reload, run the backend (`make run` or `go run . -addr :4334`)
 > and `cd web && npm run dev` separately — Vite serves on `:5173` and proxies `/api` to `:4334`.
+
+## Docker
+
+`docker-compose.yml` runs two containers: the **app** (built from the `Dockerfile`) and the
+**official Qdrant image** — kept separate so each has its own lifecycle and persistent volume.
+
+```sh
+make docker-up      # http://localhost:4334
+```
+
+- **App image** — a 3-stage build: build the UI (Node) → build the Go binary with the UI
+  embedded → a slim Debian runtime with the ONNX Runtime shared library installed (matched to
+  the image architecture). `ONNX_PATH` is preset, so the container is fully self-contained.
+- **Networking** — the app reaches Qdrant via the compose service name (`QDRANT_URL=http://qdrant:6333`).
+- **Volumes** — `qdrant_storage` (vector data) and `model_cache` (the ~77 MB embedding model,
+  downloaded on the first ingest) both persist across restarts. `make docker-down ARGS=-v`
+  removes them.
 
 ## How it works
 

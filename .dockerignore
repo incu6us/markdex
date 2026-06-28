@@ -1,0 +1,11 @@
+.git
+.gitignore
+.claude
+.termide
+bin
+model_cache
+node_modules
+web/node_modules
+web/dist
+*.out
+*.test
