@@ -71,7 +71,7 @@ type stubSearcher struct {
 	gotTopK       int
 }
 
-func (s *stubSearcher) Search(_ context.Context, collection, query string, topK int, _ domain.Filter) ([]domain.SearchHit, error) {
+func (s *stubSearcher) Search(_ context.Context, collection, query string, topK int, _ domain.Filter, _ bool) ([]domain.SearchHit, error) {
 	s.gotCollection = collection
 	s.gotQuery = query
 	s.gotTopK = topK
@@ -406,7 +406,7 @@ type mapSearcher struct {
 	byQuery map[string][]domain.SearchHit
 }
 
-func (m mapSearcher) Search(_ context.Context, _, query string, _ int, _ domain.Filter) ([]domain.SearchHit, error) {
+func (m mapSearcher) Search(_ context.Context, _, query string, _ int, _ domain.Filter, _ bool) ([]domain.SearchHit, error) {
 	return m.byQuery[query], nil
 }
 

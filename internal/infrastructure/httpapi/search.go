@@ -11,7 +11,7 @@ import (
 const defaultSearchTopK = 8
 
 type Searcher interface {
-	Search(ctx context.Context, collection, query string, topK int, filter domain.Filter) ([]domain.SearchHit, error)
+	Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error)
 }
 
 type searchRequest struct {
@@ -19,6 +19,7 @@ type searchRequest struct {
 	Query      string            `json:"query"`
 	TopK       int               `json:"top_k"`
 	Filter     map[string]string `json:"filter"`
+	Expand     bool              `json:"expand"`
 }
 
 type searchHit struct {
@@ -48,7 +49,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		topK = defaultSearchTopK
 	}
 
-	hits, err := s.searcher.Search(r.Context(), req.Collection, req.Query, topK, domain.Filter{Match: req.Filter})
+	hits, err := s.searcher.Search(r.Context(), req.Collection, req.Query, topK, domain.Filter{Match: req.Filter}, req.Expand)
 	if err != nil {
 		s.logger.Error("search failed", "collection", req.Collection, "err", err)
 		writeError(w, http.StatusBadGateway, "search failed")

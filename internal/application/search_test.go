@@ -36,7 +36,7 @@ func TestSearchServiceReranksCandidates(t *testing.T) {
 	}}
 
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
-	hits, err := service.Search(context.Background(), "q", 2, domain.Filter{})
+	hits, err := service.Search(context.Background(), "q", 2, domain.Filter{}, false)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -55,6 +55,28 @@ func TestSearchServiceReranksCandidates(t *testing.T) {
 	}
 }
 
+func TestSearchServiceExpandsToSection(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	repo.searchHits = []domain.SearchHit{
+		{ID: "a", Document: "small chunk", Metadata: map[string]string{"source_id": "s", "heading_path": "h"}},
+	}
+	repo.sectionText = "the full reassembled section text"
+	reranker := &fakeReranker{rerank: func(_ string, _ []string, _ int) ([]domain.Ranked, error) {
+		return []domain.Ranked{{Index: 0, Score: 0.9}}, nil
+	}}
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
+
+	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, true)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(hits) != 1 || hits[0].Document != "the full reassembled section text" {
+		t.Fatalf("expand: hit document = %q", hits[0].Document)
+	}
+}
+
 func TestSearchServiceEmptyCandidates(t *testing.T) {
 	t.Parallel()
 
@@ -65,7 +87,7 @@ func TestSearchServiceEmptyCandidates(t *testing.T) {
 	}}
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
 
-	hits, err := service.Search(context.Background(), "q", 5, domain.Filter{})
+	hits, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false)
 	if err != nil || hits != nil {
 		t.Fatalf("got %v / %v, want nil/nil", hits, err)
 	}
@@ -79,7 +101,7 @@ func TestSearchServicePropagatesSearchError(t *testing.T) {
 	reranker := &fakeReranker{rerank: func(string, []string, int) ([]domain.Ranked, error) { return nil, nil }}
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50)
 
-	if _, err := service.Search(context.Background(), "q", 5, domain.Filter{}); !errors.Is(err, repo.searchErr) {
+	if _, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false); !errors.Is(err, repo.searchErr) {
 		t.Fatalf("err = %v, want %v", err, repo.searchErr)
 	}
 }

@@ -230,6 +230,81 @@ func (r *Repository) describe(ctx context.Context, name string) (CollectionInfo,
 	return info, nil
 }
 
+// Section reassembles the full text of one heading section: all chunks sharing the given
+// source_id + heading_path, ordered by chunk_index and de-overlapped (window chunks overlap).
+func (r *Repository) Section(ctx context.Context, sourceID, headingPath string) (string, error) {
+	type chunk struct {
+		index int
+		doc   string
+	}
+	var chunks []chunk
+	var offset any
+	for {
+		body := map[string]any{
+			"limit":        256,
+			"with_payload": []string{"document", "metadata"},
+			"filter": map[string]any{"must": []map[string]any{
+				{"key": "metadata.source_id", "match": map[string]any{"value": sourceID}},
+				{"key": "metadata.heading_path", "match": map[string]any{"value": headingPath}},
+			}},
+		}
+		if offset != nil {
+			body["offset"] = offset
+		}
+
+		var out struct {
+			Result struct {
+				Points []struct {
+					Payload struct {
+						Document string `json:"document"`
+						Metadata struct {
+							ChunkIndex int `json:"chunk_index"`
+						} `json:"metadata"`
+					} `json:"payload"`
+				} `json:"points"`
+				NextPageOffset any `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := r.do(ctx, http.MethodPost, "/collections/"+r.collection+"/points/scroll", body, &out); err != nil {
+			return "", fmt.Errorf("fetch section %q of %q: %w", headingPath, sourceID, err)
+		}
+		for _, point := range out.Result.Points {
+			chunks = append(chunks, chunk{index: point.Payload.Metadata.ChunkIndex, doc: point.Payload.Document})
+		}
+		if out.Result.NextPageOffset == nil {
+			break
+		}
+		offset = out.Result.NextPageOffset
+	}
+
+	sort.Slice(chunks, func(i, j int) bool { return chunks[i].index < chunks[j].index })
+
+	var b strings.Builder
+	for i, c := range chunks {
+		if i == 0 {
+			b.WriteString(c.doc)
+			continue
+		}
+		b.WriteString(appendDeoverlapped(b.String(), c.doc))
+	}
+	return b.String(), nil
+}
+
+// appendDeoverlapped returns the part of next to append after prev, dropping the longest
+// prefix of next that is already a suffix of prev (so overlapping window chunks join cleanly).
+func appendDeoverlapped(prev, next string) string {
+	max := len(prev)
+	if len(next) < max {
+		max = len(next)
+	}
+	for k := max; k > 0; k-- {
+		if strings.HasSuffix(prev, next[:k]) {
+			return next[k:]
+		}
+	}
+	return next
+}
+
 // Headings scrolls the collection and returns the distinct `metadata.heading_path` values
 // (sorted) — useful for authoring eval golden sets against a collection's real sections.
 func (r *Repository) Headings(ctx context.Context) ([]string, error) {

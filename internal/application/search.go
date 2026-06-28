@@ -32,7 +32,7 @@ func NewSearchService(
 	}
 }
 
-func (s *SearchService) Search(ctx context.Context, query string, topK int, filter domain.Filter) ([]domain.SearchHit, error) {
+func (s *SearchService) Search(ctx context.Context, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error) {
 	if topK < 1 {
 		topK = 1
 	}
@@ -70,6 +70,11 @@ func (s *SearchService) Search(ctx context.Context, query string, topK int, filt
 		}
 		hit := candidates[r.Index]
 		hit.Score = r.Score
+		if expand {
+			if section, err := s.repo.Section(ctx, hit.Metadata["source_id"], hit.Metadata["heading_path"]); err == nil && section != "" {
+				hit.Document = section
+			}
+		}
 		hits = append(hits, hit)
 	}
 	return hits, nil

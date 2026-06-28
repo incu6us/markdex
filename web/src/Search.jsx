@@ -5,6 +5,7 @@ export default function Search({ collections }) {
   const [collection, setCollection] = useState('')
   const [query, setQuery] = useState('')
   const [topK, setTopK] = useState(8)
+  const [expand, setExpand] = useState(false)
   const [results, setResults] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -19,7 +20,7 @@ export default function Search({ collections }) {
     setBusy(true)
     setResults(null)
     try {
-      const data = await search({ collection, query: query.trim(), top_k: Number(topK) || 8 })
+      const data = await search({ collection, query: query.trim(), top_k: Number(topK) || 8, expand })
       setResults(data.results || [])
     } catch (err) {
       setError(err.message)
@@ -66,6 +67,10 @@ export default function Search({ collections }) {
               {busy ? 'Searching…' : 'Search'}
             </button>
           </div>
+          <label className="checkbox">
+            <input type="checkbox" checked={expand} onChange={(e) => setExpand(e.target.checked)} />
+            Expand each hit to its full section (parent-document retrieval)
+          </label>
         </form>
       </section>
 

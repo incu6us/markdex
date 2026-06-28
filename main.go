@@ -186,10 +186,10 @@ type chunkSearcher struct {
 	poolSize  int
 }
 
-func (s *chunkSearcher) Search(ctx context.Context, collection, query string, topK int, filter domain.Filter) ([]domain.SearchHit, error) {
+func (s *chunkSearcher) Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error) {
 	repo := qdrant.NewRepository(s.qdrantURL, s.apiKey, collection, s.schema)
 	service := application.NewSearchService(s.embedder, repo, s.reranker, s.poolSize)
-	return service.Search(ctx, query, topK, filter)
+	return service.Search(ctx, query, topK, filter, expand)
 }
 
 type documentSource struct {

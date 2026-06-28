@@ -267,6 +267,36 @@ func TestRepositoryList(t *testing.T) {
 	}
 }
 
+func TestRepositorySection(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/points/scroll") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return
+		}
+		// Returned out of order; chunks overlap ("world foo").
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+			"points": []map[string]any{
+				{"payload": map[string]any{"document": "world foo bar", "metadata": map[string]any{"chunk_index": 1}}},
+				{"payload": map[string]any{"document": "Hello world foo", "metadata": map[string]any{"chunk_index": 0}}},
+			},
+			"next_page_offset": nil,
+		}})
+	}
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	t.Cleanup(server.Close)
+
+	repo := qdrant.NewRepository(server.URL, "", "docs", domain.CollectionSchema{})
+	text, err := repo.Section(context.Background(), "docs/go.md", "go/interfaces")
+	if err != nil {
+		t.Fatalf("section: %v", err)
+	}
+	if text != "Hello world foo bar" {
+		t.Fatalf("section = %q, want %q (ordered + de-overlapped)", text, "Hello world foo bar")
+	}
+}
+
 func TestRepositoryHeadings(t *testing.T) {
 	t.Parallel()
 

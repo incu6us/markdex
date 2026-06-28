@@ -54,6 +54,8 @@ type fakeRepository struct {
 	searchHits   []domain.SearchHit
 	searchErr    error
 	searchTopN   int
+	sectionText  string
+	sectionErr   error
 }
 
 func newFakeRepository() *fakeRepository {
@@ -74,6 +76,10 @@ func (r *fakeRepository) Replace(_ context.Context, sourceID string, chunks []do
 func (r *fakeRepository) Search(_ context.Context, _ domain.Vectors, topN int, _ domain.Filter) ([]domain.SearchHit, error) {
 	r.searchTopN = topN
 	return r.searchHits, r.searchErr
+}
+
+func (r *fakeRepository) Section(_ context.Context, _, _ string) (string, error) {
+	return r.sectionText, r.sectionErr
 }
 
 func (r *fakeRepository) stored() int {
