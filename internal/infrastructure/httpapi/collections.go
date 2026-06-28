@@ -24,8 +24,26 @@ type CollectionCreator interface {
 	Create(ctx context.Context, name string) error
 }
 
+type HeadingsProvider interface {
+	Headings(ctx context.Context, collection string) ([]string, error)
+}
+
 type collectionsResponse struct {
 	Collections []Collection `json:"collections"`
+}
+
+type headingsResponse struct {
+	Headings []string `json:"headings"`
+}
+
+func (s *Server) handleHeadings(w http.ResponseWriter, r *http.Request) {
+	headings, err := s.headings.Headings(r.Context(), r.PathValue("name"))
+	if err != nil {
+		s.logger.Error("list headings failed", "collection", r.PathValue("name"), "err", err)
+		writeError(w, http.StatusBadGateway, "failed to list headings")
+		return
+	}
+	writeJSON(w, http.StatusOK, headingsResponse{Headings: headings})
 }
 
 func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {

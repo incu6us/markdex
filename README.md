@@ -192,6 +192,7 @@ Endpoints:
 | `POST /api/preview` | Split a source and return the H1-topic tree (no embedding). |
 | `GET /api/collections` | List collections with dimension, named vector, and point count. |
 | `POST /api/collections` | Create a collection sized for the embedding model. |
+| `GET /api/collections/{name}/headings` | Distinct `heading_path`s in a collection (for authoring golden sets). |
 | `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }`. |
 | `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. |
 | `POST /api/eval` | Score a golden set against search → `{ metrics: { mrr, hit_at_1/3/k }, results }`. |
@@ -334,12 +335,10 @@ keyword matching).
 
 1. **Ingest** your docs (UI **Ingest** tab, or `POST /api/ingest`) into a new collection, e.g.
    `my-docs`.
-2. **Discover the section slugs** to label against — they're the `heading_path` values:
+2. **Discover the section slugs** to label against — they're the `heading_path` values. The
+   **Eval** tab lists them as clickable chips when you pick a collection, or fetch them:
    ```sh
-   curl -s -X POST http://localhost:4334/api/search \
-     -H 'Content-Type: application/json' \
-     -d '{"collection":"my-docs","query":"overview","top_k":20}' \
-     | jq -r '.results[].metadata.heading_path'
+   curl -s http://localhost:4334/api/collections/my-docs/headings | jq -r '.headings[]'
    ```
 3. **Write a golden set** `my-docs.json` with `collection: "my-docs"` and ~10–20 queries, each
    with a `relevant_heading_contains` substring drawn from those slugs.

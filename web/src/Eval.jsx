@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { evaluate } from './api.js'
+import { useEffect, useState } from 'react'
+import { evaluate, listHeadings } from './api.js'
 
 const DEFAULT_GOLDEN = `{
   "top_k": 10,
@@ -16,9 +16,22 @@ const DEFAULT_GOLDEN = `{
 export default function Eval({ collections }) {
   const [collection, setCollection] = useState('')
   const [golden, setGolden] = useState(DEFAULT_GOLDEN)
+  const [headings, setHeadings] = useState([])
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!collection) {
+      setHeadings([])
+      return
+    }
+    let cancelled = false
+    listHeadings(collection)
+      .then((data) => { if (!cancelled) setHeadings(data.headings || []) })
+      .catch(() => { if (!cancelled) setHeadings([]) })
+    return () => { cancelled = true }
+  }, [collection])
 
   async function onRun() {
     setError('')
@@ -75,6 +88,25 @@ export default function Eval({ collections }) {
             ))}
           </select>
         </div>
+
+        {headings.length > 0 && (
+          <details className="headings">
+            <summary>{headings.length} sections in this collection — click a path to copy</summary>
+            <div className="heading-chips">
+              {headings.map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  className="chip"
+                  title="copy to clipboard"
+                  onClick={() => navigator.clipboard?.writeText(h)}
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
 
         <div className="field">
           <textarea

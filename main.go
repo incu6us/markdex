@@ -98,6 +98,7 @@ func serveAPI(
 		Fetcher:  github.NewFetcher(),
 		Lister:   &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
 		Creator:  &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Headings: &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
 		Searcher: &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize},
 		Jobs:     manager,
 		Model:    model,
@@ -208,6 +209,16 @@ type collectionCreator struct {
 func (c *collectionCreator) Create(ctx context.Context, name string) error {
 	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, name, c.schema)
 	return repo.Prepare(ctx)
+}
+
+type headingsProvider struct {
+	qdrantURL string
+	apiKey    string
+}
+
+func (h *headingsProvider) Headings(ctx context.Context, collection string) ([]string, error) {
+	repo := qdrant.NewRepository(h.qdrantURL, h.apiKey, collection, domain.CollectionSchema{})
+	return repo.Headings(ctx)
 }
 
 type collectionLister struct {

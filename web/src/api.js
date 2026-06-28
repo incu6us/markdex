@@ -20,6 +20,10 @@ export function listCollections() {
   return jsonFetch('/api/collections')
 }
 
+export function listHeadings(collection) {
+  return jsonFetch(`/api/collections/${encodeURIComponent(collection)}/headings`)
+}
+
 export function createCollection(name) {
   return jsonFetch('/api/collections', {
     method: 'POST',

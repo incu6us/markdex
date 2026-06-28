@@ -267,6 +267,57 @@ func TestRepositoryList(t *testing.T) {
 	}
 }
 
+func TestRepositoryHeadings(t *testing.T) {
+	t.Parallel()
+
+	page := 0
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/points/scroll") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return
+		}
+		page++
+		if page == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+				"points": []map[string]any{
+					{"payload": map[string]any{"metadata": map[string]any{"heading_path": "go/interfaces"}}},
+					{"payload": map[string]any{"metadata": map[string]any{"heading_path": "go/errors"}}},
+					{"payload": map[string]any{"metadata": map[string]any{"heading_path": "go/interfaces"}}},
+				},
+				"next_page_offset": "p2",
+			}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+			"points": []map[string]any{
+				{"payload": map[string]any{"metadata": map[string]any{"heading_path": "go/naming"}}},
+				{"payload": map[string]any{"metadata": map[string]any{"heading_path": ""}}},
+			},
+			"next_page_offset": nil,
+		}})
+	}
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	t.Cleanup(server.Close)
+
+	repo := qdrant.NewRepository(server.URL, "", "go", domain.CollectionSchema{})
+	headings, err := repo.Headings(context.Background())
+	if err != nil {
+		t.Fatalf("headings: %v", err)
+	}
+	if page != 2 {
+		t.Fatalf("expected 2 scroll pages, got %d", page)
+	}
+	want := []string{"go/errors", "go/interfaces", "go/naming"}
+	if len(headings) != len(want) {
+		t.Fatalf("headings = %v, want %v", headings, want)
+	}
+	for i := range want {
+		if headings[i] != want[i] {
+			t.Fatalf("headings = %v, want %v (sorted, deduped, no empties)", headings, want)
+		}
+	}
+}
+
 func sourceIDFromFilter(t *testing.T, body map[string]any) string {
 	t.Helper()
 	filter := body["filter"].(map[string]any)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -227,6 +228,52 @@ func (r *Repository) describe(ctx context.Context, name string) (CollectionInfo,
 		break
 	}
 	return info, nil
+}
+
+// Headings scrolls the collection and returns the distinct `metadata.heading_path` values
+// (sorted) — useful for authoring eval golden sets against a collection's real sections.
+func (r *Repository) Headings(ctx context.Context) ([]string, error) {
+	seen := map[string]struct{}{}
+	var offset any
+	for {
+		body := map[string]any{"limit": 256, "with_payload": []string{"metadata"}}
+		if offset != nil {
+			body["offset"] = offset
+		}
+
+		var out struct {
+			Result struct {
+				Points []struct {
+					Payload struct {
+						Metadata struct {
+							HeadingPath string `json:"heading_path"`
+						} `json:"metadata"`
+					} `json:"payload"`
+				} `json:"points"`
+				NextPageOffset any `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := r.do(ctx, http.MethodPost, "/collections/"+r.collection+"/points/scroll", body, &out); err != nil {
+			return nil, fmt.Errorf("scroll headings in %q: %w", r.collection, err)
+		}
+
+		for _, point := range out.Result.Points {
+			if hp := point.Payload.Metadata.HeadingPath; hp != "" {
+				seen[hp] = struct{}{}
+			}
+		}
+		if out.Result.NextPageOffset == nil {
+			break
+		}
+		offset = out.Result.NextPageOffset
+	}
+
+	headings := make([]string, 0, len(seen))
+	for h := range seen {
+		headings = append(headings, h)
+	}
+	sort.Strings(headings)
+	return headings, nil
 }
 
 func (r *Repository) collectionExists(ctx context.Context) (bool, error) {

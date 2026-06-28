@@ -28,6 +28,7 @@ type Config struct {
 	Fetcher  Fetcher
 	Lister   CollectionLister
 	Creator  CollectionCreator
+	Headings HeadingsProvider
 	Searcher Searcher
 	Jobs     *JobManager
 	Model    ModelInfo
@@ -40,6 +41,7 @@ type Server struct {
 	fetcher  Fetcher
 	lister   CollectionLister
 	creator  CollectionCreator
+	headings HeadingsProvider
 	searcher Searcher
 	jobs     *JobManager
 	model    ModelInfo
@@ -57,6 +59,7 @@ func NewServer(cfg Config) *Server {
 		fetcher:  cfg.Fetcher,
 		lister:   cfg.Lister,
 		creator:  cfg.Creator,
+		headings: cfg.Headings,
 		searcher: cfg.Searcher,
 		jobs:     cfg.Jobs,
 		model:    cfg.Model,
@@ -70,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/preview", s.handlePreview)
 	mux.HandleFunc("GET /api/collections", s.handleCollections)
 	mux.HandleFunc("POST /api/collections", s.handleCreateCollection)
+	mux.HandleFunc("GET /api/collections/{name}/headings", s.handleHeadings)
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)
 	mux.HandleFunc("POST /api/search", s.handleSearch)
 	mux.HandleFunc("POST /api/eval", s.handleEval)

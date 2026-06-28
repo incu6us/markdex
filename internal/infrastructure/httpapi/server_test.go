@@ -78,12 +78,22 @@ func (s *stubSearcher) Search(_ context.Context, collection, query string, topK 
 	return s.hits, s.err
 }
 
+type stubHeadings struct {
+	headings []string
+	err      error
+}
+
+func (s stubHeadings) Headings(context.Context, string) ([]string, error) {
+	return s.headings, s.err
+}
+
 type testDeps struct {
 	lister   httpapi.CollectionLister
 	creator  httpapi.CollectionCreator
 	fetcher  httpapi.Fetcher
 	ingester httpapi.Ingester
 	searcher httpapi.Searcher
+	headings httpapi.HeadingsProvider
 	model    httpapi.ModelInfo
 }
 
@@ -105,6 +115,7 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 		Fetcher:  deps.fetcher,
 		Lister:   deps.lister,
 		Creator:  deps.creator,
+		Headings: deps.headings,
 		Searcher: deps.searcher,
 		Jobs:     manager,
 		Model:    deps.model,
@@ -448,6 +459,22 @@ func TestHandleEval(t *testing.T) {
 	}
 	if len(resp.Results) != 2 || resp.Results[0].Rank != 2 || resp.Results[1].Rank != 0 {
 		t.Fatalf("results = %+v", resp.Results)
+	}
+}
+
+func TestHandleHeadings(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{headings: stubHeadings{headings: []string{"go/interfaces", "go/naming"}}})
+	rec := doRequest(t, handler, http.MethodGet, "/api/collections/go/headings", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := decodeBody[struct {
+		Headings []string `json:"headings"`
+	}](t, rec)
+	if len(resp.Headings) != 2 || resp.Headings[0] != "go/interfaces" {
+		t.Fatalf("headings = %v", resp.Headings)
 	}
 }
 
