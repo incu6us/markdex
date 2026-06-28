@@ -22,7 +22,10 @@ import (
 	"github.com/incu6us/markdex/internal/infrastructure/qdrant"
 )
 
-const embedderMaxChars = 2000
+const (
+	embedderMaxChars = 2000
+	defaultOverlap   = 200
+)
 
 //go:embed all:web/dist
 var webDist embed.FS
@@ -68,7 +71,7 @@ func serveAPI(ctx context.Context, addr, qdrantURL, apiKey string, embedder *fas
 
 	model := httpapi.ModelInfo{Dimension: embedder.Dimension(), VectorName: embedder.VectorName()}
 	server := httpapi.NewServer(httpapi.Config{
-		Chunker: markdown.NewSplitter(embedderMaxChars, 200),
+		Chunker: markdown.NewSplitter(embedderMaxChars, defaultOverlap),
 		Fetcher: github.NewFetcher(),
 		Lister:  &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", "")},
 		Creator: &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, model: model},
@@ -119,9 +122,13 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 	if maxChars < 1 {
 		maxChars = embedderMaxChars
 	}
+	overlap := spec.Overlap
+	if overlap < 1 {
+		overlap = defaultOverlap
+	}
 
 	source := documentSource{documents: []domain.Document{document}}
-	chunker := markdown.NewSplitter(maxChars, spec.Overlap)
+	chunker := markdown.NewSplitter(maxChars, overlap)
 	repo := qdrant.NewRepository(c.qdrantURL, c.apiKey, spec.Collection, c.embedder.VectorName())
 	service := application.NewIngestService(source, chunker, c.embedder, repo, 16, application.WithProgress(report))
 
