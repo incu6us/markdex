@@ -16,3 +16,6 @@
 # python bytecode
 __pycache__/
 *.pyc
+
+# Playwright MCP run artifacts
+.playwright-mcp/

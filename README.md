@@ -175,6 +175,7 @@ dimension + vector names from the sidecar's `/info` to size collections.
 | `-qdrant`    | `http://localhost:6333` | Qdrant REST base URL (`QDRANT_URL` env)             |
 | `-embedder`  | `http://localhost:8000` | Embedder sidecar base URL (`EMBEDDER_URL` env)      |
 | `-pool`      | `24`                    | Rerank candidate pool (lower = faster, higher = better recall) |
+| `-supersede-threshold` | `0.97`        | Memory write: rerank-score cutoff above which a new memory replaces a near-identical one (higher = more conservative). Calibrated; tune per corpus. |
 
 `QDRANT_API_KEY` is read from the environment and sent as the `api-key` header when set.
 Per-document `max_chars` and `overlap` are set per ingest request.
@@ -206,6 +207,9 @@ Endpoints:
 | `GET /api/collections/{name}/headings` | Distinct `heading_path`s in a collection (for authoring golden sets). |
 | `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }`. |
 | `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. `expand: true` returns each hit's full enclosing section (parent-document retrieval). |
+| `POST /api/memories` | Store an agent **memory** (supersede-or-append) → `201 { source_id, superseded, version }`. Optional `supersede_threshold` (0,1] overrides the merge cutoff for this write. |
+| `GET /api/collections/{name}/memories` | List a collection's memories (newest first) → `{ memories: [{ source_id, document, author, updated_at, version, tags }] }`. |
+| `DELETE /api/memories/{id}?collection=…` | Delete a memory by its `source_id` (forget) → `204`. |
 | `POST /api/eval` | Score a golden set against search → `{ metrics: { mrr, hit_at_1/3/k }, results }`. |
 | `GET /api/jobs/{id}` | Job state (`pending`/`running`/`succeeded`/`failed`, progress, count). |
 | `GET /api/jobs/{id}/stream` | Server-Sent Events stream of the same job state. |
@@ -239,14 +243,54 @@ curl -s -X POST http://localhost:4334/api/search -H 'Content-Type: application/j
 }'
 ```
 
+### Agent memory (write-back)
+
+Beyond ingesting curated docs, an agent can **write** what it learns and have future searches
+retrieve it. A memory is one short, current-state fact stored as a single point tagged
+`metadata.type="memory"` (plus `author`, `created_at`/`updated_at`, `version`, optional
+`namespace`/`tags`):
+
+```sh
+curl -s -X POST http://localhost:4334/api/memories -H 'Content-Type: application/json' -d '{
+  "collection": "team-memory",
+  "text": "Acme is on the legacy billing plan.",
+  "author": "agent:claude-code",
+  "tags": "billing,acme"
+}'
+# → { "source_id": "memory:…", "superseded": false, "version": 1 }
+```
+
+- **Semantic supersede** — before writing, markdex probes the collection for a near-identical
+  existing memory (lexical word-shingle Jaccard, then the cross-encoder rerank score above
+  `-supersede-threshold`). A match is **replaced in place** (same `source_id`, `version` bumped);
+  otherwise a new memory is appended. So re-recording a paraphrased fact updates it instead of
+  piling up duplicates.
+- **Configurable target** — the `collection` can be a dedicated `*-memory` collection (created on
+  first write) **or** an existing doc collection. The supersede probe is always filtered to
+  `type="memory"`, so a memory can **never** replace (delete) a curated document — even in a
+  shared collection.
+- **Retrieval** is unchanged: memories are just more vectors. Filter a search with
+  `{"filter": {"type": "memory"}}` to target only memories, or omit it to blend memory with docs.
+- **Per-request override** — pass `supersede_threshold` (0,1] to merge more/less aggressively for
+  one write; omit to use the calibrated server default.
+- **Forget**: `DELETE /api/memories/{source_id}?collection=…`.
+- **UI** — the **Memory** tab exposes all of this: a remember form (with an advanced merge-threshold
+  slider), the collection's memories list, and a per-memory *forget* button.
+
+> Write-back currently ships **open** (like the rest of the API). All write routes pass through a
+> single `requireAuth` seam (a no-op today) so adding token auth is a one-place change — it is the
+> immediate follow-up before any shared/multi-tenant use.
+
 The React UI lives in `web/` (Vite). In production it is built into `web/dist` and served by
 the Go backend from the same origin (`make run`, or `make ui-build` + `go run .`). For hot
 reload during development, run `cd web && npm run dev` (Vite on `:5173`, proxying `/api` to
 `:4334`).
 
-Four tabs: **Ingest** (pick a source → preview the H1 topics → choose a collection → ingest
+Five tabs: **Ingest** (pick a source → preview the H1 topics → choose a collection → ingest
 with a live progress bar), **Search** (hybrid + reranked results, optional `expand` to the full
-section), **Collections** (create / delete), and **Eval** (run a golden set → MRR / Hit@k). The
+section), **Memory** (remember a fact → supersede-or-append, with a list of the collection's
+memories and per-row *forget*; an *advanced* toggle exposes the merge threshold),
+**Collections** (create / delete), and **Eval** (run a golden set → MRR / Hit@k). The
 selected collection and active tab persist across tabs and reloads.
 
 ## Verify
@@ -375,19 +419,21 @@ markdex stack must be running for it to work.
 
 ### Tools
 
-It offers three **read-only** tools (annotated as such for the client), so an agent can discover
-collections and structure before querying:
+Three **read-only** discovery/retrieval tools and two **write** tools for agent memory:
 
 | Tool | Input | Returns |
 | --- | --- | --- |
 | `list_collections` | — | every collection with its point count + dimension |
 | `list_headings` | `{ collection }` | the collection's heading paths (valid `heading_path` filters) |
 | `search` | `{ collection, query, top_k?, expand? }` | reranked chunks, or full sections with `expand` (`top_k` defaults to 8, capped at 100) |
+| `remember` | `{ collection, text, author?, namespace?, tags? }` | `{ source_id, superseded, version }` — stores a fact (supersede-or-append) |
+| `forget` | `{ collection, id }` | deletes a memory by `source_id` |
 
-Each tool returns both human-readable text **and** structured output (the SDK generates an
-`outputSchema` from the typed result). They call markdex's REST API under the hood via the
-`internal/infrastructure/markdexclient` adapter, so agents get the same hybrid + cross-encoder
-quality the UI does.
+The read tools are annotated `readOnly`; `remember`/`forget` are annotated as writes (`forget`
+also `destructive`). Each tool returns both human-readable text **and** structured output (the SDK
+generates an `outputSchema` from the typed result). They call markdex's REST API under the hood via
+the `internal/infrastructure/markdexclient` adapter, so agents get the same hybrid + cross-encoder
+quality the UI does — and can now grow a memory the team's other agents can read.
 
 ## Retrieval evaluation
 

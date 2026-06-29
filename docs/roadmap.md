@@ -32,6 +32,20 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       `markdexclient` adapter; register with `claude mcp add markdex -- go run ./cmd/mcp`.
       Typed I/O + structured output + tool annotations; protocol-version negotiation handled by
       the SDK. Verified end-to-end (initialize → tools/list → call).
+- [x] **Agent write-back (memory)** — markdex is now writable: `POST /api/memories` +
+      `remember`/`forget` MCP tools, with **semantic supersede** (a near-identical existing memory is
+      replaced in place — lexical Jaccard pre-gate, then cross-encoder rerank score above
+      `-supersede-threshold` — else appended) and a **configurable target collection** (a dedicated
+      `*-memory` collection or an existing doc collection). Reuses the retrieval spine (`Replace` =
+      delete-by-source + upsert; dup probe via `/api/search` filtered to `type="memory"`, which is
+      also the **clobber guard** — a memory can never replace a curated doc). Memories carry
+      `type`/`author`/`created_at`/`updated_at`/`version`/`namespace`/`tags`. Strict-TDD/DDD across
+      domain → application (`MemoryService`) → httpapi → markdexclient → MCP. Verified end-to-end on
+      the live stack: append → search → supersede (paraphrase, point count flat, `version` 2) →
+      append (unrelated, +1) → forget (gone from search); plus the clobber guard (memory into the
+      115-pt `go-style-guide` doc collection: 115→116→115, no doc deleted, point tagged
+      `type=memory`). Ships **open**; all writes route through a no-op `requireAuth` seam so auth is a
+      one-place follow-up (Tier 4). Plan in [memory_plan.md](memory_plan.md).
 - [x] **Collections management UI** — dedicated **Collections** tab listing every collection
       (name, points, dimension) with create + delete; delete asks for a single confirmation and
       is backed by `DELETE /api/collections/{name}` → Qdrant `Repository.Delete`. Selected
