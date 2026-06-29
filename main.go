@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/incu6us/markdex/internal/application"
@@ -31,6 +32,12 @@ const (
 	// dedupThreshold drops chunks that are >=90% shingle-identical to an earlier one.
 	dedupThreshold  = 0.9
 	defaultPoolSize = 24
+	// memorySupersedeThreshold is the rerank-score cutoff above which a new memory
+	// replaces a near-identical existing one (the sidecar reranker emits ~0..1
+	// scores). Calibrated to 0.97: on a labeled same/different memory-pair set this
+	// was the lowest cutoff with zero wrong supersedes (see docs/memory_plan.md).
+	// Tune per corpus; raise it to be even more conservative.
+	memorySupersedeThreshold = 0.97
 )
 
 //go:embed all:web/dist
@@ -41,6 +48,7 @@ func main() {
 	embedderURL := flag.String("embedder", envOr("EMBEDDER_URL", "http://localhost:8000"), "embedder sidecar base URL")
 	addr := flag.String("addr", ":4334", "HTTP listen address")
 	poolSize := flag.Int("pool", defaultPoolSize, "rerank candidate pool size (lower = faster search, higher = better recall)")
+	supersedeThreshold := flag.Float64("supersede-threshold", memorySupersedeThreshold, "rerank-score cutoff above which a new memory replaces a near-identical one (higher = more conservative)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -62,7 +70,7 @@ func main() {
 	}
 	model := httpapi.ModelInfo{Dimension: info.DenseDim, VectorName: info.DenseName}
 
-	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder, schema, model, *poolSize, logger); err != nil {
+	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder, schema, model, *poolSize, *supersedeThreshold, logger); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
@@ -91,6 +99,7 @@ func serveAPI(
 	schema domain.CollectionSchema,
 	model httpapi.ModelInfo,
 	poolSize int,
+	supersedeThreshold float64,
 	logger *slog.Logger,
 ) error {
 	ingester := &chunkIngester{embedder: embedder, counter: embedder, fetcher: github.NewFetcher(), logger: logger, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
@@ -98,19 +107,30 @@ func serveAPI(
 	manager.Start()
 	defer manager.Stop()
 
+	// One searcher instance plays two roles: the /api/search handler's Searcher and
+	// the memory write-path's supersede-probe (its signature satisfies both ports).
+	searcher := &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize, logger: logger}
+	memoryService := application.NewMemoryService(embedder, searcher,
+		&memoryStore{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		application.WithSupersedeThreshold(supersedeThreshold),
+		application.WithDedupThreshold(dedupThreshold),
+	)
+
 	server := httpapi.NewServer(httpapi.Config{
-		Chunker:    markdown.NewSplitter(embedderMaxChars, defaultOverlap),
-		Fetcher:    github.NewFetcher(),
-		RepoLister: github.NewRepoLister(),
-		Lister:     &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
-		Creator:    &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
-		Deleter:    &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
-		Headings:   &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
-		Searcher:   &chunkSearcher{embedder: embedder, reranker: embedder, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema, poolSize: poolSize, logger: logger},
-		Jobs:       manager,
-		Model:      model,
-		UI:         embeddedUI(logger),
-		Logger:     logger,
+		Chunker:      markdown.NewSplitter(embedderMaxChars, defaultOverlap),
+		Fetcher:      github.NewFetcher(),
+		RepoLister:   github.NewRepoLister(),
+		Lister:       &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
+		Creator:      &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Deleter:      &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
+		Headings:     &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
+		Searcher:     searcher,
+		Memorizer:    &memorizer{svc: memoryService},
+		MemoryLister: &memoryLister{qdrantURL: qdrantURL, apiKey: apiKey},
+		Jobs:         manager,
+		Model:        model,
+		UI:           embeddedUI(logger),
+		Logger:       logger,
 	})
 
 	httpServer := &http.Server{
@@ -266,6 +286,82 @@ func (s *chunkSearcher) Search(ctx context.Context, collection, query string, to
 	repo := qdrant.NewRepository(s.qdrantURL, s.apiKey, collection, s.schema)
 	service := application.NewSearchService(s.embedder, repo, s.reranker, s.poolSize, s.logger)
 	return service.Search(ctx, query, topK, filter, expand)
+}
+
+// memoryStore is the collection-aware write side for agent memory: it builds a
+// per-collection Qdrant repository on demand for prepare/replace/delete.
+type memoryStore struct {
+	qdrantURL string
+	apiKey    string
+	schema    domain.CollectionSchema
+}
+
+func (s *memoryStore) repo(collection string) *qdrant.Repository {
+	return qdrant.NewRepository(s.qdrantURL, s.apiKey, collection, s.schema)
+}
+
+func (s *memoryStore) Prepare(ctx context.Context, collection string) error {
+	return s.repo(collection).Prepare(ctx)
+}
+
+func (s *memoryStore) Replace(ctx context.Context, collection, sourceID string, chunks []domain.EmbeddedChunk) error {
+	return s.repo(collection).Replace(ctx, sourceID, chunks)
+}
+
+func (s *memoryStore) DeleteSources(ctx context.Context, collection string, ids []string) error {
+	return s.repo(collection).DeleteSources(ctx, ids)
+}
+
+// memorizer adapts *application.MemoryService to the httpapi.Memorizer port.
+type memorizer struct {
+	svc *application.MemoryService
+}
+
+func (m *memorizer) Remember(ctx context.Context, in httpapi.RememberInput) (httpapi.MemoryRecord, error) {
+	res, err := m.svc.Remember(ctx, application.RememberParams{
+		Collection:         in.Collection,
+		Text:               in.Text,
+		Author:             in.Author,
+		Namespace:          in.Namespace,
+		Tags:               in.Tags,
+		SupersedeThreshold: in.SupersedeThreshold,
+	})
+	if err != nil {
+		return httpapi.MemoryRecord{}, err
+	}
+	return httpapi.MemoryRecord{SourceID: res.SourceID, Superseded: res.Superseded, Version: res.Version}, nil
+}
+
+func (m *memorizer) Forget(ctx context.Context, collection, id string) error {
+	return m.svc.Forget(ctx, collection, id)
+}
+
+// memoryLister lists a collection's memories for the Memory UI, adapting Qdrant's
+// stored records to the httpapi shape (version string → int).
+type memoryLister struct {
+	qdrantURL string
+	apiKey    string
+}
+
+func (l *memoryLister) ListMemories(ctx context.Context, collection string) ([]httpapi.Memory, error) {
+	repo := qdrant.NewRepository(l.qdrantURL, l.apiKey, collection, domain.CollectionSchema{})
+	stored, err := repo.ListMemories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.Memory, len(stored))
+	for i, m := range stored {
+		version, _ := strconv.Atoi(m.Version)
+		out[i] = httpapi.Memory{
+			SourceID:  m.SourceID,
+			Document:  m.Document,
+			Author:    m.Author,
+			UpdatedAt: m.UpdatedAt,
+			Version:   version,
+			Tags:      m.Tags,
+		}
+	}
+	return out, nil
 }
 
 type documentSource struct {

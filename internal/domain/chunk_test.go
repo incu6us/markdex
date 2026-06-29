@@ -44,6 +44,49 @@ func TestNewChunk(t *testing.T) {
 	}
 }
 
+func TestChunkMetadata(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil metadata is exposed as nil", func(t *testing.T) {
+		t.Parallel()
+		chunk, err := domain.NewChunk(validChunkParams())
+		if err != nil {
+			t.Fatalf("new chunk: %v", err)
+		}
+		if chunk.Metadata() != nil {
+			t.Fatalf("metadata = %v, want nil", chunk.Metadata())
+		}
+	})
+
+	t.Run("custom metadata is preserved", func(t *testing.T) {
+		t.Parallel()
+		params := validChunkParams()
+		params.Metadata = map[string]string{"type": "memory", "author": "agent:claude-code"}
+		chunk, err := domain.NewChunk(params)
+		if err != nil {
+			t.Fatalf("new chunk: %v", err)
+		}
+		md := chunk.Metadata()
+		if md["type"] != "memory" || md["author"] != "agent:claude-code" {
+			t.Fatalf("metadata = %v", md)
+		}
+	})
+
+	t.Run("metadata is copied, not aliased", func(t *testing.T) {
+		t.Parallel()
+		params := validChunkParams()
+		params.Metadata = map[string]string{"type": "memory"}
+		chunk, err := domain.NewChunk(params)
+		if err != nil {
+			t.Fatalf("new chunk: %v", err)
+		}
+		params.Metadata["type"] = "mutated" // must not affect the stored chunk
+		if chunk.Metadata()["type"] != "memory" {
+			t.Fatalf("metadata aliased caller's map: %v", chunk.Metadata())
+		}
+	})
+}
+
 func TestChunkIDIdentity(t *testing.T) {
 	t.Parallel()
 

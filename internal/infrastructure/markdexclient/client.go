@@ -98,6 +98,57 @@ func (c *Client) ListHeadings(ctx context.Context, collection string) ([]string,
 	return out.Headings, nil
 }
 
+// RememberParams are the inputs to Remember.
+type RememberParams struct {
+	Collection string
+	Text       string
+	Author     string
+	Namespace  string
+	Tags       string
+	// SupersedeThreshold optionally overrides the server default for this write.
+	SupersedeThreshold *float64
+}
+
+// RememberResult reports what the server did with the memory.
+type RememberResult struct {
+	SourceID   string `json:"source_id"`
+	Superseded bool   `json:"superseded"`
+	Version    int    `json:"version"`
+}
+
+// Remember stores a fact in a collection, superseding a near-identical existing
+// memory in place or appending a new one.
+func (c *Client) Remember(ctx context.Context, p RememberParams) (RememberResult, error) {
+	payload := map[string]any{
+		"collection": p.Collection,
+		"text":       p.Text,
+		"author":     p.Author,
+		"namespace":  p.Namespace,
+		"tags":       p.Tags,
+	}
+	if p.SupersedeThreshold != nil {
+		payload["supersede_threshold"] = *p.SupersedeThreshold
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return RememberResult{}, fmt.Errorf("marshal remember request: %w", err)
+	}
+	var out RememberResult
+	if err := c.do(ctx, http.MethodPost, "/api/memories", bytes.NewReader(body), &out); err != nil {
+		return RememberResult{}, fmt.Errorf("remember: %w", err)
+	}
+	return out, nil
+}
+
+// Forget deletes a memory by its source_id from a collection.
+func (c *Client) Forget(ctx context.Context, collection, id string) error {
+	path := "/api/memories/" + url.PathEscape(id) + "?collection=" + url.QueryEscape(collection)
+	if err := c.do(ctx, http.MethodDelete, path, nil, nil); err != nil {
+		return fmt.Errorf("forget: %w", err)
+	}
+	return nil
+}
+
 // do performs an HTTP request against the markdex API and decodes a JSON response.
 func (c *Client) do(ctx context.Context, method, path string, body *bytes.Reader, out any) error {
 	var reqBody io.Reader
@@ -117,7 +168,7 @@ func (c *Client) do(ctx context.Context, method, path string, body *bytes.Reader
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Surface the markdex error body (e.g. {"error":"..."}) so a calling
 		// agent can self-correct; cap it so a runaway body can't blow up the message.
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
@@ -125,6 +176,9 @@ func (c *Client) do(ctx context.Context, method, path string, body *bytes.Reader
 			return fmt.Errorf("status %d: %s", resp.StatusCode, msg)
 		}
 		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	if out == nil {
+		return nil // e.g. 204 No Content (Forget)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

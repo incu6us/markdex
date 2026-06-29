@@ -154,6 +154,57 @@ func TestRepositoryReplaceDeletesThenUpserts(t *testing.T) {
 	}
 }
 
+func TestRepositoryReplaceMergesMetadata(t *testing.T) {
+	t.Parallel()
+
+	repo, rec := newRepository(t, true)
+	chunk, err := domain.NewChunk(domain.ChunkParams{
+		SourceID: "memory://abc",
+		Index:    0,
+		Content:  "Acme is on legacy billing",
+		Metadata: map[string]string{
+			"type":        "memory",
+			"author":      "agent:claude-code",
+			"source_id":   "spoofed", // a reserved key must NOT be overridable from the bag
+			"chunk_index": "999",
+		},
+	})
+	if err != nil {
+		t.Fatalf("new chunk: %v", err)
+	}
+	dense, _ := domain.NewEmbedding([]float32{0.1, 0.2, 0.3})
+	sparse, _ := domain.NewSparseEmbedding([]uint32{1}, []float32{0.5})
+	ec := domain.EmbeddedChunk{Chunk: chunk, Vectors: domain.Vectors{Dense: dense, Sparse: sparse}}
+
+	if err := repo.Replace(context.Background(), "memory://abc", []domain.EmbeddedChunk{ec}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+
+	var up *recordedRequest
+	for _, call := range rec.calls() {
+		if call.method == http.MethodPut && strings.HasSuffix(call.path, "/points") {
+			c := call
+			up = &c
+		}
+	}
+	if up == nil {
+		t.Fatal("expected an upsert PUT")
+	}
+	points := up.body["points"].([]any)
+	md := points[0].(map[string]any)["payload"].(map[string]any)["metadata"].(map[string]any)
+
+	if md["type"] != "memory" || md["author"] != "agent:claude-code" {
+		t.Fatalf("custom metadata missing: %v", md)
+	}
+	// Reserved keys are set from the chunk's typed fields and win over the bag.
+	if md["source_id"] != "memory://abc" {
+		t.Fatalf("source_id = %v, want memory://abc (reserved key not spoofable)", md["source_id"])
+	}
+	if md["chunk_index"] != float64(0) { // JSON round-trips numbers as float64
+		t.Fatalf("chunk_index = %v, want 0 (reserved key not spoofable)", md["chunk_index"])
+	}
+}
+
 func TestRepositoryPrepare(t *testing.T) {
 	t.Parallel()
 
@@ -359,6 +410,55 @@ func TestRepositoryHeadings(t *testing.T) {
 		if headings[i] != want[i] {
 			t.Fatalf("headings = %v, want %v (sorted, deduped, no empties)", headings, want)
 		}
+	}
+}
+
+func TestRepositoryListMemories(t *testing.T) {
+	t.Parallel()
+
+	var gotFilter map[string]any
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/points/scroll") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if f, ok := body["filter"].(map[string]any); ok {
+			gotFilter = f
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+			"points": []map[string]any{
+				{"id": "u1", "payload": map[string]any{"document": "Acme on legacy billing", "metadata": map[string]any{
+					"source_id": "memory:1", "type": "memory", "author": "agent:x", "updated_at": "2026-06-29T10:00:00Z", "version": "2", "tags": "billing",
+				}}},
+				{"id": "u2", "payload": map[string]any{"document": "Deploys on Friday", "metadata": map[string]any{
+					"source_id": "memory:2", "type": "memory", "author": "agent:y", "updated_at": "2026-06-29T12:00:00Z", "version": "1",
+				}}},
+			},
+			"next_page_offset": nil,
+		}})
+	}
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	t.Cleanup(server.Close)
+
+	repo := qdrant.NewRepository(server.URL, "", "team-memory", domain.CollectionSchema{})
+	mems, err := repo.ListMemories(context.Background())
+	if err != nil {
+		t.Fatalf("list memories: %v", err)
+	}
+
+	// Filtered to memories only.
+	cond := gotFilter["must"].([]any)[0].(map[string]any)
+	if cond["key"] != "metadata.type" || cond["match"].(map[string]any)["value"] != "memory" {
+		t.Fatalf("filter = %v, want metadata.type=memory", gotFilter)
+	}
+	// Newest first (updated_at desc).
+	if len(mems) != 2 || mems[0].SourceID != "memory:2" || mems[1].SourceID != "memory:1" {
+		t.Fatalf("memories = %+v, want newest-first", mems)
+	}
+	if mems[1].Author != "agent:x" || mems[1].Version != "2" || mems[1].Tags != "billing" || mems[1].Document != "Acme on legacy billing" {
+		t.Fatalf("memory fields = %+v", mems[1])
 	}
 }
 

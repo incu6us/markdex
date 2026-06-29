@@ -74,6 +74,18 @@ func (r *Repository) Replace(ctx context.Context, sourceID string, chunks []doma
 	points := make([]map[string]any, 0, len(chunks))
 	for _, ec := range chunks {
 		chunk := ec.Chunk
+		// Start from the optional free-form bag, then set the reserved keys from the
+		// chunk's typed fields so they always win (a memory can't spoof source_id).
+		metadata := make(map[string]any, len(chunk.Metadata())+5)
+		for k, v := range chunk.Metadata() {
+			metadata[k] = v
+		}
+		metadata["path"] = chunk.SourceID()
+		metadata["source_id"] = chunk.SourceID()
+		metadata["title"] = chunk.Title()
+		metadata["heading_path"] = chunk.HeadingPath()
+		metadata["chunk_index"] = chunk.Index()
+
 		points = append(points, map[string]any{
 			"id": chunk.ID(),
 			"vector": map[string]any{
@@ -85,13 +97,7 @@ func (r *Repository) Replace(ctx context.Context, sourceID string, chunks []doma
 			},
 			"payload": map[string]any{
 				"document": chunk.Content(),
-				"metadata": map[string]any{
-					"path":         chunk.SourceID(),
-					"source_id":    chunk.SourceID(),
-					"title":        chunk.Title(),
-					"heading_path": chunk.HeadingPath(),
-					"chunk_index":  chunk.Index(),
-				},
+				"metadata": metadata,
 			},
 		})
 	}
@@ -349,6 +355,75 @@ func (r *Repository) Headings(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(headings)
 	return headings, nil
+}
+
+// StoredMemory is one agent memory point read back from the collection.
+type StoredMemory struct {
+	SourceID  string
+	Document  string
+	Author    string
+	UpdatedAt string
+	Version   string
+	Tags      string
+}
+
+// ListMemories scrolls the collection for points tagged metadata.type="memory" and
+// returns them newest-first (by updated_at), for the Memory UI / management.
+func (r *Repository) ListMemories(ctx context.Context) ([]StoredMemory, error) {
+	var memories []StoredMemory
+	var offset any
+	for {
+		body := map[string]any{
+			"limit":        256,
+			"with_payload": []string{"document", "metadata"},
+			"filter": map[string]any{"must": []map[string]any{
+				{"key": "metadata.type", "match": map[string]any{"value": "memory"}},
+			}},
+		}
+		if offset != nil {
+			body["offset"] = offset
+		}
+
+		var out struct {
+			Result struct {
+				Points []struct {
+					Payload struct {
+						Document string `json:"document"`
+						Metadata struct {
+							SourceID  string `json:"source_id"`
+							Author    string `json:"author"`
+							UpdatedAt string `json:"updated_at"`
+							Version   string `json:"version"`
+							Tags      string `json:"tags"`
+						} `json:"metadata"`
+					} `json:"payload"`
+				} `json:"points"`
+				NextPageOffset any `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := r.do(ctx, http.MethodPost, "/collections/"+r.collection+"/points/scroll", body, &out); err != nil {
+			return nil, fmt.Errorf("scroll memories in %q: %w", r.collection, err)
+		}
+		for _, point := range out.Result.Points {
+			m := point.Payload.Metadata
+			memories = append(memories, StoredMemory{
+				SourceID:  m.SourceID,
+				Document:  point.Payload.Document,
+				Author:    m.Author,
+				UpdatedAt: m.UpdatedAt,
+				Version:   m.Version,
+				Tags:      m.Tags,
+			})
+		}
+		if out.Result.NextPageOffset == nil {
+			break
+		}
+		offset = out.Result.NextPageOffset
+	}
+
+	// Newest first: RFC3339 timestamps sort lexicographically by time.
+	sort.Slice(memories, func(i, j int) bool { return memories[i].UpdatedAt > memories[j].UpdatedAt })
+	return memories, nil
 }
 
 // ListSources scrolls the collection and returns its distinct `metadata.source_id`

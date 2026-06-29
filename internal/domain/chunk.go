@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,11 @@ type ChunkParams struct {
 	Title       string
 	HeadingPath string
 	Content     string
+	// Metadata is an optional free-form bag merged into the stored payload's
+	// metadata alongside the reserved keys (path, source_id, title, heading_path,
+	// chunk_index). Reserved keys are always set from the typed fields above and
+	// cannot be overridden from here. Used for agent memory (type, author, …).
+	Metadata map[string]string
 }
 
 type Chunk struct {
@@ -27,6 +33,7 @@ type Chunk struct {
 	title       string
 	headingPath string
 	content     string
+	metadata    map[string]string
 }
 
 func NewChunk(p ChunkParams) (Chunk, error) {
@@ -45,11 +52,27 @@ func NewChunk(p ChunkParams) (Chunk, error) {
 		title:       p.Title,
 		headingPath: p.HeadingPath,
 		content:     p.Content,
+		metadata:    copyMetadata(p.Metadata),
 	}, nil
+}
+
+// copyMetadata returns a defensive copy of m so a Chunk never aliases its
+// caller's map. An empty/nil map stays nil.
+func copyMetadata(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	return maps.Clone(m)
 }
 
 func (c Chunk) ID() string {
 	return uuid.NewSHA1(pathNamespace, []byte(c.sourceID+"#"+strconv.Itoa(c.index))).String()
+}
+
+// NewID returns a fresh random identifier, used to mint a unique source_id for a
+// new agent memory ("memory://<id>").
+func NewID() string {
+	return uuid.NewString()
 }
 
 func (c Chunk) SourceID() string { return c.sourceID }
@@ -61,6 +84,9 @@ func (c Chunk) Title() string { return c.title }
 func (c Chunk) HeadingPath() string { return c.headingPath }
 
 func (c Chunk) Content() string { return c.content }
+
+// Metadata returns the chunk's optional free-form metadata bag (nil if none).
+func (c Chunk) Metadata() map[string]string { return c.metadata }
 
 // ContextualText returns the chunk content prefixed with a human-readable
 // breadcrumb of its heading path (contextual retrieval), so the embedding

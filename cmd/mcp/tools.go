@@ -16,6 +16,8 @@ type markdexService interface {
 	Search(ctx context.Context, p markdexclient.SearchParams) ([]markdexclient.Hit, error)
 	ListCollections(ctx context.Context) ([]markdexclient.Collection, error)
 	ListHeadings(ctx context.Context, collection string) ([]string, error)
+	Remember(ctx context.Context, p markdexclient.RememberParams) (markdexclient.RememberResult, error)
+	Forget(ctx context.Context, collection, id string) error
 }
 
 // toolDeps carries the dependencies shared by every tool handler.
@@ -113,6 +115,70 @@ func (d *toolDeps) listHeadings(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return textResult(formatHeadings(in.Collection, heads)), headingsOutput{Headings: heads}, nil
 }
 
+// --- remember ---
+
+type rememberInput struct {
+	Collection         string   `json:"collection" jsonschema:"collection to store the memory in"`
+	Text               string   `json:"text" jsonschema:"the fact to remember, as a short self-contained statement"`
+	Author             string   `json:"author,omitempty" jsonschema:"who is recording this (agent or user id)"`
+	Namespace          string   `json:"namespace,omitempty" jsonschema:"optional scope, e.g. team:payments"`
+	Tags               string   `json:"tags,omitempty" jsonschema:"optional comma-separated tags"`
+	SupersedeThreshold *float64 `json:"supersede_threshold,omitempty" jsonschema:"advanced: rerank-score cutoff (0,1] to replace a near-identical memory; omit to use the server default"`
+}
+
+type rememberOutput struct {
+	SourceID   string `json:"source_id"`
+	Superseded bool   `json:"superseded"`
+	Version    int    `json:"version"`
+}
+
+func (d *toolDeps) remember(ctx context.Context, _ *mcp.CallToolRequest, in rememberInput) (*mcp.CallToolResult, rememberOutput, error) {
+	if strings.TrimSpace(in.Collection) == "" || strings.TrimSpace(in.Text) == "" {
+		return nil, rememberOutput{}, errors.New("collection and text are required")
+	}
+	if in.SupersedeThreshold != nil && (*in.SupersedeThreshold <= 0 || *in.SupersedeThreshold > 1) {
+		return nil, rememberOutput{}, errors.New("supersede_threshold must be in (0, 1]")
+	}
+	res, err := d.svc.Remember(ctx, markdexclient.RememberParams{
+		Collection:         in.Collection,
+		Text:               in.Text,
+		Author:             in.Author,
+		Namespace:          in.Namespace,
+		Tags:               in.Tags,
+		SupersedeThreshold: in.SupersedeThreshold,
+	})
+	if err != nil {
+		return nil, rememberOutput{}, err
+	}
+	out := rememberOutput{SourceID: res.SourceID, Superseded: res.Superseded, Version: res.Version}
+	verb := "Stored"
+	if res.Superseded {
+		verb = "Updated (superseded a near-identical memory)"
+	}
+	return textResult(fmt.Sprintf("%s memory %s (v%d).", verb, res.SourceID, res.Version)), out, nil
+}
+
+// --- forget ---
+
+type forgetInput struct {
+	Collection string `json:"collection" jsonschema:"collection the memory is in"`
+	ID         string `json:"id" jsonschema:"the memory source_id to delete (as returned by remember)"`
+}
+
+type forgetOutput struct {
+	Deleted bool `json:"deleted"`
+}
+
+func (d *toolDeps) forget(ctx context.Context, _ *mcp.CallToolRequest, in forgetInput) (*mcp.CallToolResult, forgetOutput, error) {
+	if strings.TrimSpace(in.Collection) == "" || strings.TrimSpace(in.ID) == "" {
+		return nil, forgetOutput{}, errors.New("collection and id are required")
+	}
+	if err := d.svc.Forget(ctx, in.Collection, in.ID); err != nil {
+		return nil, forgetOutput{}, err
+	}
+	return textResult(fmt.Sprintf("Deleted memory %s.", in.ID)), forgetOutput{Deleted: true}, nil
+}
+
 // --- registration ---
 
 // register wires every markdex tool onto the MCP server. The tools are read-only
@@ -140,6 +206,22 @@ func (d *toolDeps) register(s *mcp.Server) {
 			"structure and valid heading_path values before searching.",
 		Annotations: readOnly,
 	}, d.listHeadings)
+
+	// Write tools: agent memory. Not read-only; remember supersedes a near-identical
+	// existing memory in place (or appends), forget deletes one by id.
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "remember",
+		Description: "Store a fact in a markdex collection so future searches (and agents) can retrieve it. " +
+			"A near-identical existing memory is replaced in place; otherwise a new one is appended. " +
+			"Use for durable knowledge an agent learns: rules, conventions, business facts.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, OpenWorldHint: ptr(true)},
+	}, d.remember)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "forget",
+		Description: "Delete a memory from a collection by its source_id (as returned by remember).",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr(true), OpenWorldHint: ptr(true)},
+	}, d.forget)
 }
 
 // --- formatting ---

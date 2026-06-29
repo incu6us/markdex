@@ -128,16 +128,47 @@ func (s stubHeadings) Headings(context.Context, string) ([]string, error) {
 	return s.headings, s.err
 }
 
+type stubMemorizer struct {
+	record           httpapi.MemoryRecord
+	err              error
+	gotInput         httpapi.RememberInput
+	forgotCollection string
+	forgotID         string
+}
+
+func (s *stubMemorizer) Remember(_ context.Context, in httpapi.RememberInput) (httpapi.MemoryRecord, error) {
+	s.gotInput = in
+	return s.record, s.err
+}
+
+func (s *stubMemorizer) Forget(_ context.Context, collection, id string) error {
+	s.forgotCollection, s.forgotID = collection, id
+	return s.err
+}
+
+type stubMemoryLister struct {
+	memories      []httpapi.Memory
+	err           error
+	gotCollection string
+}
+
+func (s *stubMemoryLister) ListMemories(_ context.Context, collection string) ([]httpapi.Memory, error) {
+	s.gotCollection = collection
+	return s.memories, s.err
+}
+
 type testDeps struct {
-	lister     httpapi.CollectionLister
-	creator    httpapi.CollectionCreator
-	deleter    httpapi.CollectionDeleter
-	repoLister httpapi.RepoLister
-	fetcher    httpapi.Fetcher
-	ingester   httpapi.Ingester
-	searcher   httpapi.Searcher
-	headings   httpapi.HeadingsProvider
-	model      httpapi.ModelInfo
+	lister       httpapi.CollectionLister
+	creator      httpapi.CollectionCreator
+	deleter      httpapi.CollectionDeleter
+	repoLister   httpapi.RepoLister
+	fetcher      httpapi.Fetcher
+	ingester     httpapi.Ingester
+	searcher     httpapi.Searcher
+	headings     httpapi.HeadingsProvider
+	memorizer    httpapi.Memorizer
+	memoryLister httpapi.MemoryLister
+	model        httpapi.ModelInfo
 }
 
 func newTestServer(t *testing.T, deps testDeps) http.Handler {
@@ -154,17 +185,19 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 	t.Cleanup(manager.Stop)
 
 	return httpapi.NewServer(httpapi.Config{
-		Chunker:    markdown.NewSplitter(2000, 200),
-		Fetcher:    deps.fetcher,
-		Lister:     deps.lister,
-		Creator:    deps.creator,
-		Deleter:    deps.deleter,
-		RepoLister: deps.repoLister,
-		Headings:   deps.headings,
-		Searcher:   deps.searcher,
-		Jobs:       manager,
-		Model:      deps.model,
-		Logger:     logger,
+		Chunker:      markdown.NewSplitter(2000, 200),
+		Fetcher:      deps.fetcher,
+		Lister:       deps.lister,
+		Creator:      deps.creator,
+		Deleter:      deps.deleter,
+		RepoLister:   deps.repoLister,
+		Headings:     deps.headings,
+		Searcher:     deps.searcher,
+		Memorizer:    deps.memorizer,
+		MemoryLister: deps.memoryLister,
+		Jobs:         manager,
+		Model:        deps.model,
+		Logger:       logger,
 	}).Handler()
 }
 
@@ -733,6 +766,151 @@ func TestHandleEvalValidation(t *testing.T) {
 	rec := doRequest(t, handler, http.MethodPost, "/api/eval", map[string]any{"collection": "c"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (no queries)", rec.Code)
+	}
+}
+
+func TestHandleRemember(t *testing.T) {
+	t.Parallel()
+
+	mem := &stubMemorizer{record: httpapi.MemoryRecord{SourceID: "memory:abc", Superseded: true, Version: 3}}
+	handler := newTestServer(t, testDeps{memorizer: mem})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/memories", map[string]any{
+		"collection": "team-memory", "text": "Acme is on legacy billing", "author": "agent:claude-code", "tags": "billing",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	resp := decodeBody[struct {
+		SourceID   string `json:"source_id"`
+		Superseded bool   `json:"superseded"`
+		Version    int    `json:"version"`
+	}](t, rec)
+	if resp.SourceID != "memory:abc" || !resp.Superseded || resp.Version != 3 {
+		t.Fatalf("response = %+v", resp)
+	}
+	if mem.gotInput.Collection != "team-memory" || mem.gotInput.Text != "Acme is on legacy billing" || mem.gotInput.Author != "agent:claude-code" || mem.gotInput.Tags != "billing" {
+		t.Fatalf("memorizer got %+v", mem.gotInput)
+	}
+}
+
+func TestHandleRememberValidation(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{memorizer: &stubMemorizer{}})
+	cases := []map[string]any{
+		{"collection": "m"},                 // no text
+		{"text": "fact"},                    // no collection
+		{"collection": " ", "text": "fact"}, // blank collection
+	}
+	for _, body := range cases {
+		rec := doRequest(t, handler, http.MethodPost, "/api/memories", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400 for %v", rec.Code, body)
+		}
+	}
+}
+
+func TestHandleRememberPassesThreshold(t *testing.T) {
+	t.Parallel()
+
+	mem := &stubMemorizer{record: httpapi.MemoryRecord{SourceID: "memory:abc"}}
+	handler := newTestServer(t, testDeps{memorizer: mem})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/memories", map[string]any{
+		"collection": "m", "text": "fact", "supersede_threshold": 0.9,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	if mem.gotInput.SupersedeThreshold == nil || *mem.gotInput.SupersedeThreshold != 0.9 {
+		t.Fatalf("threshold passed = %v, want 0.9", mem.gotInput.SupersedeThreshold)
+	}
+}
+
+func TestHandleRememberThresholdValidation(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{memorizer: &stubMemorizer{}})
+	for _, bad := range []float64{1.5, -0.1, 0} {
+		rec := doRequest(t, handler, http.MethodPost, "/api/memories", map[string]any{
+			"collection": "m", "text": "fact", "supersede_threshold": bad,
+		})
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("threshold %v: status = %d, want 400", bad, rec.Code)
+		}
+	}
+}
+
+func TestHandleRememberError(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{memorizer: &stubMemorizer{err: errors.New("embed down")}})
+	rec := doRequest(t, handler, http.MethodPost, "/api/memories", map[string]any{"collection": "m", "text": "fact"})
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+}
+
+func TestHandleRememberRejectsDimensionMismatch(t *testing.T) {
+	t.Parallel()
+
+	lister := stubLister{collections: []httpapi.Collection{{Name: "wrong", Dimension: 768, VectorName: "other"}}}
+	model := httpapi.ModelInfo{Dimension: 1024, VectorName: "bge-m3-dense"}
+	handler := newTestServer(t, testDeps{memorizer: &stubMemorizer{}, lister: lister, model: model})
+
+	rec := doRequest(t, handler, http.MethodPost, "/api/memories", map[string]any{"collection": "wrong", "text": "fact"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+}
+
+func TestHandleForget(t *testing.T) {
+	t.Parallel()
+
+	mem := &stubMemorizer{}
+	handler := newTestServer(t, testDeps{memorizer: mem})
+
+	rec := doRequest(t, handler, http.MethodDelete, "/api/memories/memory:abc?collection=team-memory", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body)
+	}
+	if mem.forgotCollection != "team-memory" || mem.forgotID != "memory:abc" {
+		t.Fatalf("forgot %q in %q", mem.forgotID, mem.forgotCollection)
+	}
+}
+
+func TestHandleListMemories(t *testing.T) {
+	t.Parallel()
+
+	lister := &stubMemoryLister{memories: []httpapi.Memory{
+		{SourceID: "memory:2", Document: "Deploys on Friday", Author: "agent:y", Version: 1},
+		{SourceID: "memory:1", Document: "Acme on legacy billing", Author: "agent:x", Version: 2, Tags: "billing"},
+	}}
+	handler := newTestServer(t, testDeps{memoryLister: lister})
+
+	rec := doRequest(t, handler, http.MethodGet, "/api/collections/team-memory/memories", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	resp := decodeBody[struct {
+		Memories []httpapi.Memory `json:"memories"`
+	}](t, rec)
+	if len(resp.Memories) != 2 || resp.Memories[0].SourceID != "memory:2" || resp.Memories[1].Tags != "billing" {
+		t.Fatalf("memories = %+v", resp.Memories)
+	}
+	if lister.gotCollection != "team-memory" {
+		t.Fatalf("collection = %q", lister.gotCollection)
+	}
+}
+
+func TestHandleForgetValidation(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestServer(t, testDeps{memorizer: &stubMemorizer{}})
+	rec := doRequest(t, handler, http.MethodDelete, "/api/memories/memory:abc", nil) // no ?collection
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
 

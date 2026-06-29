@@ -6,6 +6,30 @@ import (
 	"github.com/incu6us/markdex/internal/domain"
 )
 
+func TestShingleSimilarity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		a, b    string
+		wantMin float64
+		wantMax float64
+	}{
+		{name: "identical", a: "the quick brown fox jumps", b: "the quick brown fox jumps", wantMin: 1.0, wantMax: 1.0},
+		{name: "disjoint", a: "the quick brown fox jumps", b: "lorem ipsum dolor sit amet", wantMin: 0.0, wantMax: 0.0},
+		{name: "near restatement", a: "acme is on the legacy billing plan", b: "acme is on the legacy billing system", wantMin: 0.3, wantMax: 0.95},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := domain.ShingleSimilarity(tt.a, tt.b)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Fatalf("similarity = %v, want in [%v,%v]", got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
 func chunkWith(t *testing.T, index int, content string) domain.Chunk {
 	t.Helper()
 	c, err := domain.NewChunk(domain.ChunkParams{SourceID: "s", Index: index, Content: content})

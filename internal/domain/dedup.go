@@ -35,6 +35,14 @@ func DedupeChunks(chunks []Chunk, threshold float64) []Chunk {
 	return kept
 }
 
+// ShingleSimilarity returns the word-shingle Jaccard similarity (0..1) of two
+// texts — the same measure DedupeChunks uses, exposed for the memory write path's
+// lexical supersede pre-gate (a near-identical restatement should replace, not
+// duplicate, an existing memory).
+func ShingleSimilarity(a, b string) float64 {
+	return jaccard(shingleSet(a), shingleSet(b))
+}
+
 // shingleSet returns the set of overlapping word n-grams of a text (normalized to
 // lowercase words). Texts shorter than shingleSize fall back to a single shingle
 // of all their words, so they still compare exactly.

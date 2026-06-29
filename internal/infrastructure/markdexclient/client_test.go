@@ -90,6 +90,110 @@ func TestListCollections(t *testing.T) {
 	}
 }
 
+func TestRemember(t *testing.T) {
+	t.Parallel()
+
+	var gotPath, gotMethod string
+	var gotBody struct {
+		Collection string `json:"collection"`
+		Text       string `json:"text"`
+		Author     string `json:"author"`
+		Tags       string `json:"tags"`
+	}
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"source_id":"memory:abc","superseded":true,"version":3}`))
+	})
+
+	res, err := c.Remember(context.Background(), RememberParams{
+		Collection: "team-memory", Text: "a fact", Author: "agent:claude-code", Tags: "billing",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/memories" {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if gotBody.Collection != "team-memory" || gotBody.Text != "a fact" || gotBody.Author != "agent:claude-code" || gotBody.Tags != "billing" {
+		t.Fatalf("request body = %+v", gotBody)
+	}
+	if res.SourceID != "memory:abc" || !res.Superseded || res.Version != 3 {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestRememberWithThreshold(t *testing.T) {
+	t.Parallel()
+
+	var raw map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"source_id":"memory:abc"}`))
+	})
+
+	th := 0.9
+	if _, err := c.Remember(context.Background(), RememberParams{Collection: "c", Text: "x", SupersedeThreshold: &th}); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if raw["supersede_threshold"] != 0.9 {
+		t.Fatalf("body supersede_threshold = %v, want 0.9", raw["supersede_threshold"])
+	}
+}
+
+func TestRememberOmitsThresholdWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	var raw map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"source_id":"memory:abc"}`))
+	})
+
+	if _, err := c.Remember(context.Background(), RememberParams{Collection: "c", Text: "x"}); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if _, present := raw["supersede_threshold"]; present {
+		t.Fatalf("supersede_threshold should be omitted when unset, body=%v", raw)
+	}
+}
+
+func TestForget(t *testing.T) {
+	t.Parallel()
+
+	var gotPath, gotMethod, gotQuery string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod, gotQuery = r.URL.Path, r.Method, r.URL.RawQuery
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	if err := c.Forget(context.Background(), "team-memory", "memory:abc"); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/api/memories/memory:abc" {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if gotQuery != "collection=team-memory" {
+		t.Fatalf("query = %q, want collection=team-memory", gotQuery)
+	}
+}
+
+func TestRememberNon2xx(t *testing.T) {
+	t.Parallel()
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"collection mismatch"}`, http.StatusConflict)
+	})
+	_, err := c.Remember(context.Background(), RememberParams{Collection: "c", Text: "x"})
+	if err == nil || !strings.Contains(err.Error(), "collection mismatch") {
+		t.Fatalf("err = %v, want surfaced backend message", err)
+	}
+}
+
 func TestListHeadings(t *testing.T) {
 	t.Parallel()
 

@@ -29,33 +29,37 @@ type RepoLister interface {
 }
 
 type Config struct {
-	Chunker    domain.Chunker
-	Fetcher    Fetcher
-	RepoLister RepoLister
-	Lister     CollectionLister
-	Creator    CollectionCreator
-	Deleter    CollectionDeleter
-	Headings   HeadingsProvider
-	Searcher   Searcher
-	Jobs       *JobManager
-	Model      ModelInfo
-	UI         fs.FS
-	Logger     *slog.Logger
+	Chunker      domain.Chunker
+	Fetcher      Fetcher
+	RepoLister   RepoLister
+	Lister       CollectionLister
+	Creator      CollectionCreator
+	Deleter      CollectionDeleter
+	Headings     HeadingsProvider
+	Searcher     Searcher
+	Memorizer    Memorizer
+	MemoryLister MemoryLister
+	Jobs         *JobManager
+	Model        ModelInfo
+	UI           fs.FS
+	Logger       *slog.Logger
 }
 
 type Server struct {
-	chunker    domain.Chunker
-	fetcher    Fetcher
-	repoLister RepoLister
-	lister     CollectionLister
-	creator    CollectionCreator
-	deleter    CollectionDeleter
-	headings   HeadingsProvider
-	searcher   Searcher
-	jobs       *JobManager
-	model      ModelInfo
-	ui         fs.FS
-	logger     *slog.Logger
+	chunker      domain.Chunker
+	fetcher      Fetcher
+	repoLister   RepoLister
+	lister       CollectionLister
+	creator      CollectionCreator
+	deleter      CollectionDeleter
+	headings     HeadingsProvider
+	searcher     Searcher
+	memorizer    Memorizer
+	memoryLister MemoryLister
+	jobs         *JobManager
+	model        ModelInfo
+	ui           fs.FS
+	logger       *slog.Logger
 }
 
 func NewServer(cfg Config) *Server {
@@ -64,18 +68,20 @@ func NewServer(cfg Config) *Server {
 		logger = slog.Default()
 	}
 	return &Server{
-		chunker:    cfg.Chunker,
-		fetcher:    cfg.Fetcher,
-		repoLister: cfg.RepoLister,
-		lister:     cfg.Lister,
-		creator:    cfg.Creator,
-		deleter:    cfg.Deleter,
-		headings:   cfg.Headings,
-		searcher:   cfg.Searcher,
-		jobs:       cfg.Jobs,
-		model:      cfg.Model,
-		ui:         cfg.UI,
-		logger:     logger,
+		chunker:      cfg.Chunker,
+		fetcher:      cfg.Fetcher,
+		repoLister:   cfg.RepoLister,
+		lister:       cfg.Lister,
+		creator:      cfg.Creator,
+		deleter:      cfg.Deleter,
+		headings:     cfg.Headings,
+		searcher:     cfg.Searcher,
+		memorizer:    cfg.Memorizer,
+		memoryLister: cfg.MemoryLister,
+		jobs:         cfg.Jobs,
+		model:        cfg.Model,
+		ui:           cfg.UI,
+		logger:       logger,
 	}
 }
 
@@ -88,6 +94,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/collections/{name}/headings", s.handleHeadings)
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)
 	mux.HandleFunc("POST /api/search", s.handleSearch)
+	// Write-back (agent memory) — routed through the requireAuth seam (no-op today).
+	mux.HandleFunc("GET /api/collections/{name}/memories", s.handleListMemories)
+	mux.HandleFunc("POST /api/memories", s.requireAuth(s.handleRemember))
+	mux.HandleFunc("DELETE /api/memories/{id}", s.requireAuth(s.handleForget))
 	mux.HandleFunc("POST /api/eval", s.handleEval)
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
 	mux.HandleFunc("GET /api/jobs/{id}/stream", s.handleJobStream)
