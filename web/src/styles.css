@@ -321,7 +321,8 @@ input.topk {
   mask-image: none;
 }
 
-textarea.golden {
+textarea.golden,
+.field textarea {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);

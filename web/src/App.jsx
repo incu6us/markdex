@@ -4,6 +4,7 @@ import usePersistedState from './usePersistedState.js'
 import Search from './Search.jsx'
 import Eval from './Eval.jsx'
 import Collections from './Collections.jsx'
+import Memory from './Memory.jsx'
 
 const TERMINAL = ['succeeded', 'failed']
 
@@ -168,6 +169,9 @@ export default function App() {
         <button className={mode === 'search' ? 'active' : ''} onClick={() => setMode('search')}>
           Search
         </button>
+        <button className={mode === 'memory' ? 'active' : ''} onClick={() => setMode('memory')}>
+          Memory
+        </button>
         <button className={mode === 'collections' ? 'active' : ''} onClick={() => setMode('collections')}>
           Collections
         </button>
@@ -179,6 +183,7 @@ export default function App() {
       {error && <div className="banner error">{error}</div>}
 
       {mode === 'search' && <Search collections={collections} collection={collection} onCollection={setCollection} />}
+      {mode === 'memory' && <Memory collections={collections} collection={collection} onCollection={setCollection} />}
       {mode === 'collections' && (
         <Collections collections={collections} onChange={refreshCollections} selected={collection} onSelect={setCollection} />
       )}

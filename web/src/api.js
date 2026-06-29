@@ -61,3 +61,21 @@ export function evaluate(payload) {
     body: JSON.stringify(payload),
   })
 }
+
+export function listMemories(collection) {
+  return jsonFetch(`/api/collections/${encodeURIComponent(collection)}/memories`)
+}
+
+export function remember(payload) {
+  return jsonFetch('/api/memories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function forgetMemory(collection, id) {
+  return jsonFetch(`/api/memories/${encodeURIComponent(id)}?collection=${encodeURIComponent(collection)}`, {
+    method: 'DELETE',
+  })
+}
