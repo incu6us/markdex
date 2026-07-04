@@ -21,6 +21,8 @@ type fakeService struct {
 	gotRemember markdexclient.RememberParams
 	gotForgetID string
 	gotForgetCo string
+	memories    []markdexclient.Memory
+	gotMemsColl string
 }
 
 func (f *fakeService) Remember(_ context.Context, p markdexclient.RememberParams) (markdexclient.RememberResult, error) {
@@ -45,6 +47,11 @@ func (f *fakeService) ListCollections(context.Context) ([]markdexclient.Collecti
 func (f *fakeService) ListHeadings(_ context.Context, collection string) ([]string, error) {
 	f.gotColl = collection
 	return f.heads, f.err
+}
+
+func (f *fakeService) ListMemories(_ context.Context, collection string) ([]markdexclient.Memory, error) {
+	f.gotMemsColl = collection
+	return f.memories, f.err
 }
 
 func textOf(t *testing.T, res *mcp.CallToolResult) string {
@@ -258,5 +265,52 @@ func TestFormatCollectionsEmpty(t *testing.T) {
 	t.Parallel()
 	if got := formatCollections(nil); !strings.Contains(strings.ToLower(got), "no collections") {
 		t.Fatalf("empty format = %q", got)
+	}
+}
+
+func TestSearchHandlerPassesFilter(t *testing.T) {
+	t.Parallel()
+	fake := &fakeService{}
+	d := &toolDeps{svc: fake}
+
+	filter := map[string]string{"type": "memory", "namespace": "team:payments"}
+	if _, _, err := d.search(context.Background(), &mcp.CallToolRequest{}, searchInput{Collection: "c", Query: "q", Filter: filter}); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if fake.gotSearch.Filter["type"] != "memory" || fake.gotSearch.Filter["namespace"] != "team:payments" {
+		t.Fatalf("filter not passed through: %+v", fake.gotSearch.Filter)
+	}
+}
+
+func TestListMemoriesHandler(t *testing.T) {
+	t.Parallel()
+	fake := &fakeService{memories: []markdexclient.Memory{
+		{SourceID: "memory:abc", Document: "we use zap", Author: "agent:claude", Version: 2, Tags: "logging"},
+	}}
+	d := &toolDeps{svc: fake}
+
+	res, out, err := d.listMemories(context.Background(), &mcp.CallToolRequest{}, listMemoriesInput{Collection: "team-memory"})
+	if err != nil {
+		t.Fatalf("listMemories: %v", err)
+	}
+	if fake.gotMemsColl != "team-memory" {
+		t.Fatalf("collection = %q, want team-memory", fake.gotMemsColl)
+	}
+	if len(out.Memories) != 1 || out.Memories[0].SourceID != "memory:abc" {
+		t.Fatalf("structured output = %+v", out)
+	}
+	text := textOf(t, res)
+	for _, want := range []string{"memory:abc", "we use zap", "agent:claude", "v2"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text %q missing %q", text, want)
+		}
+	}
+}
+
+func TestListMemoriesValidation(t *testing.T) {
+	t.Parallel()
+	d := &toolDeps{svc: &fakeService{}}
+	if _, _, err := d.listMemories(context.Background(), &mcp.CallToolRequest{}, listMemoriesInput{}); err == nil {
+		t.Fatal("expected error for missing collection")
 	}
 }

@@ -51,16 +51,23 @@ type SearchParams struct {
 	Query      string
 	TopK       int
 	Expand     bool
+	// Filter optionally restricts results by exact metadata match, e.g.
+	// {"type": "memory"}, {"heading_path": "..."}, {"source_id": "..."}.
+	Filter map[string]string
 }
 
 // Search runs hybrid retrieval + reranking against a collection.
 func (c *Client) Search(ctx context.Context, p SearchParams) ([]Hit, error) {
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"collection": p.Collection,
 		"query":      p.Query,
 		"top_k":      p.TopK,
 		"expand":     p.Expand,
-	})
+	}
+	if len(p.Filter) > 0 {
+		payload["filter"] = p.Filter
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal search request: %w", err)
 	}
@@ -138,6 +145,28 @@ func (c *Client) Remember(ctx context.Context, p RememberParams) (RememberResult
 		return RememberResult{}, fmt.Errorf("remember: %w", err)
 	}
 	return out, nil
+}
+
+// Memory is one stored agent memory as returned by the list endpoint.
+type Memory struct {
+	SourceID  string `json:"source_id"`
+	Document  string `json:"document"`
+	Author    string `json:"author,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	Version   int    `json:"version,omitempty"`
+	Tags      string `json:"tags,omitempty"`
+}
+
+// ListMemories returns a collection's memories, newest first.
+func (c *Client) ListMemories(ctx context.Context, collection string) ([]Memory, error) {
+	path := "/api/collections/" + url.PathEscape(collection) + "/memories"
+	var out struct {
+		Memories []Memory `json:"memories"`
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, fmt.Errorf("list memories: %w", err)
+	}
+	return out.Memories, nil
 }
 
 // Forget deletes a memory by its source_id from a collection.

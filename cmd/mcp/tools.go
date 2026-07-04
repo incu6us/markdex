@@ -18,6 +18,7 @@ type markdexService interface {
 	ListHeadings(ctx context.Context, collection string) ([]string, error)
 	Remember(ctx context.Context, p markdexclient.RememberParams) (markdexclient.RememberResult, error)
 	Forget(ctx context.Context, collection, id string) error
+	ListMemories(ctx context.Context, collection string) ([]markdexclient.Memory, error)
 }
 
 // toolDeps carries the dependencies shared by every tool handler.
@@ -36,10 +37,11 @@ const (
 )
 
 type searchInput struct {
-	Collection string `json:"collection" jsonschema:"collection name to search"`
-	Query      string `json:"query" jsonschema:"natural-language query"`
-	TopK       int    `json:"top_k,omitempty" jsonschema:"number of results (default 8, max 100)"`
-	Expand     bool   `json:"expand,omitempty" jsonschema:"return the full enclosing section instead of the matched chunk"`
+	Collection string            `json:"collection" jsonschema:"collection name to search"`
+	Query      string            `json:"query" jsonschema:"natural-language query"`
+	TopK       int               `json:"top_k,omitempty" jsonschema:"number of results (default 8, max 100)"`
+	Expand     bool              `json:"expand,omitempty" jsonschema:"return the full enclosing section instead of the matched chunk"`
+	Filter     map[string]string `json:"filter,omitempty" jsonschema:"exact-match metadata filter, e.g. {\"type\":\"memory\"} to search only memories, or {\"heading_path\":...}, {\"source_id\":...}, {\"namespace\":...}"`
 }
 
 type searchResult struct {
@@ -68,6 +70,7 @@ func (d *toolDeps) search(ctx context.Context, _ *mcp.CallToolRequest, in search
 		Query:      in.Query,
 		TopK:       in.TopK,
 		Expand:     in.Expand,
+		Filter:     in.Filter,
 	})
 	if err != nil {
 		return nil, searchOutput{}, err
@@ -158,6 +161,27 @@ func (d *toolDeps) remember(ctx context.Context, _ *mcp.CallToolRequest, in reme
 	return textResult(fmt.Sprintf("%s memory %s (v%d).", verb, res.SourceID, res.Version)), out, nil
 }
 
+// --- list_memories ---
+
+type listMemoriesInput struct {
+	Collection string `json:"collection" jsonschema:"collection whose memories to list"`
+}
+
+type listMemoriesOutput struct {
+	Memories []markdexclient.Memory `json:"memories"`
+}
+
+func (d *toolDeps) listMemories(ctx context.Context, _ *mcp.CallToolRequest, in listMemoriesInput) (*mcp.CallToolResult, listMemoriesOutput, error) {
+	if strings.TrimSpace(in.Collection) == "" {
+		return nil, listMemoriesOutput{}, errors.New("collection is required")
+	}
+	memories, err := d.svc.ListMemories(ctx, in.Collection)
+	if err != nil {
+		return nil, listMemoriesOutput{}, err
+	}
+	return textResult(formatMemories(in.Collection, memories)), listMemoriesOutput{Memories: memories}, nil
+}
+
 // --- forget ---
 
 type forgetInput struct {
@@ -206,6 +230,14 @@ func (d *toolDeps) register(s *mcp.Server) {
 			"structure and valid heading_path values before searching.",
 		Annotations: readOnly,
 	}, d.listHeadings)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "list_memories",
+		Description: "List a collection's stored agent memories (newest first) with their source_id, " +
+			"author, version, and tags. Use this to audit what has been remembered or to find the " +
+			"source_id needed by forget.",
+		Annotations: readOnly,
+	}, d.listMemories)
 
 	// Write tools: agent memory. Not read-only; remember supersedes a near-identical
 	// existing memory in place (or appends), forget deletes one by id.
@@ -256,6 +288,25 @@ func formatHeadings(collection string, heads []string) string {
 	fmt.Fprintf(&b, "Heading paths in %q:\n", collection)
 	for _, h := range heads {
 		fmt.Fprintf(&b, "- %s\n", h)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func formatMemories(collection string, memories []markdexclient.Memory) string {
+	if len(memories) == 0 {
+		return fmt.Sprintf("No memories in %q.", collection)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Memories in %q (newest first):\n", collection)
+	for _, m := range memories {
+		fmt.Fprintf(&b, "- %s (v%d", m.SourceID, m.Version)
+		if m.Author != "" {
+			fmt.Fprintf(&b, ", by %s", m.Author)
+		}
+		if m.Tags != "" {
+			fmt.Fprintf(&b, ", tags: %s", m.Tags)
+		}
+		fmt.Fprintf(&b, "): %s\n", m.Document)
 	}
 	return strings.TrimSpace(b.String())
 }
