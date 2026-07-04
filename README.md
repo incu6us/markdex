@@ -214,7 +214,7 @@ Endpoints:
 | `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }`. |
 | `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. `expand: true` returns each hit's full enclosing section (parent-document retrieval). |
 | `POST /api/memories` | Store an agent **memory** (supersede-or-append) → `201 { source_id, superseded, version }`. Optional `supersede_threshold` (0,1] overrides the merge cutoff for this write. |
-| `GET /api/collections/{name}/memories` | List a collection's memories (newest first) → `{ memories: [{ source_id, document, author, updated_at, version, tags }] }`. |
+| `GET /api/collections/{name}/memories` | List a collection's memories (newest first) → `{ memories: [{ source_id, document, author, namespace, created_at, updated_at, version, tags }] }`. |
 | `DELETE /api/memories/{id}?collection=…` | Delete a memory by its `source_id` (forget) → `204`. |
 | `POST /api/eval` | Score a golden set against search → `{ metrics: { mrr, hit_at_1/3/k }, results }`. |
 | `GET /api/jobs/{id}` | Job state (`pending`/`running`/`succeeded`/`failed`, progress, count). |

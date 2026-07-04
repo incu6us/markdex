@@ -38,6 +38,8 @@ type Memory struct {
 	SourceID  string `json:"source_id"`
 	Document  string `json:"document"`
 	Author    string `json:"author,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`
 	Version   int    `json:"version,omitempty"`
 	Tags      string `json:"tags,omitempty"`

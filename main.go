@@ -358,6 +358,8 @@ func (l *memoryLister) ListMemories(ctx context.Context, collection string) ([]h
 			SourceID:  m.SourceID,
 			Document:  m.Document,
 			Author:    m.Author,
+			Namespace: m.Namespace,
+			CreatedAt: m.CreatedAt,
 			UpdatedAt: m.UpdatedAt,
 			Version:   version,
 			Tags:      m.Tags,

@@ -303,6 +303,9 @@ func formatMemories(collection string, memories []markdexclient.Memory) string {
 		if m.Author != "" {
 			fmt.Fprintf(&b, ", by %s", m.Author)
 		}
+		if m.Namespace != "" {
+			fmt.Fprintf(&b, ", ns %s", m.Namespace)
+		}
 		if m.Tags != "" {
 			fmt.Fprintf(&b, ", tags: %s", m.Tags)
 		}

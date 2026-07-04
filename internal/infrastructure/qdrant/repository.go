@@ -362,6 +362,8 @@ type StoredMemory struct {
 	SourceID  string
 	Document  string
 	Author    string
+	Namespace string
+	CreatedAt string
 	UpdatedAt string
 	Version   string
 	Tags      string
@@ -392,6 +394,8 @@ func (r *Repository) ListMemories(ctx context.Context) ([]StoredMemory, error) {
 						Metadata struct {
 							SourceID  string `json:"source_id"`
 							Author    string `json:"author"`
+							Namespace string `json:"namespace"`
+							CreatedAt string `json:"created_at"`
 							UpdatedAt string `json:"updated_at"`
 							Version   string `json:"version"`
 							Tags      string `json:"tags"`
@@ -410,6 +414,8 @@ func (r *Repository) ListMemories(ctx context.Context) ([]StoredMemory, error) {
 				SourceID:  m.SourceID,
 				Document:  point.Payload.Document,
 				Author:    m.Author,
+				Namespace: m.Namespace,
+				CreatedAt: m.CreatedAt,
 				UpdatedAt: m.UpdatedAt,
 				Version:   m.Version,
 				Tags:      m.Tags,

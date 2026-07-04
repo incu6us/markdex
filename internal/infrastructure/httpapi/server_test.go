@@ -949,7 +949,8 @@ func TestHandleListMemories(t *testing.T) {
 
 	lister := &stubMemoryLister{memories: []httpapi.Memory{
 		{SourceID: "memory:2", Document: "Deploys on Friday", Author: "agent:y", Version: 1},
-		{SourceID: "memory:1", Document: "Acme on legacy billing", Author: "agent:x", Version: 2, Tags: "billing"},
+		{SourceID: "memory:1", Document: "Acme on legacy billing", Author: "agent:x", Version: 2, Tags: "billing",
+			Namespace: "team:billing", CreatedAt: "2026-06-01T09:00:00Z"},
 	}}
 	handler := newTestServer(t, testDeps{memoryLister: lister})
 
@@ -962,6 +963,9 @@ func TestHandleListMemories(t *testing.T) {
 	}](t, rec)
 	if len(resp.Memories) != 2 || resp.Memories[0].SourceID != "memory:2" || resp.Memories[1].Tags != "billing" {
 		t.Fatalf("memories = %+v", resp.Memories)
+	}
+	if resp.Memories[1].Namespace != "team:billing" || resp.Memories[1].CreatedAt != "2026-06-01T09:00:00Z" {
+		t.Fatalf("namespace/created_at lost in the response: %+v", resp.Memories[1])
 	}
 	if lister.gotCollection != "team-memory" {
 		t.Fatalf("collection = %q", lister.gotCollection)

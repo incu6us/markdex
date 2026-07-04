@@ -430,7 +430,8 @@ func TestRepositoryListMemories(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
 			"points": []map[string]any{
 				{"id": "u1", "payload": map[string]any{"document": "Acme on legacy billing", "metadata": map[string]any{
-					"source_id": "memory:1", "type": "memory", "author": "agent:x", "updated_at": "2026-06-29T10:00:00Z", "version": "2", "tags": "billing",
+					"source_id": "memory:1", "type": "memory", "author": "agent:x", "namespace": "team:billing",
+					"created_at": "2026-06-01T09:00:00Z", "updated_at": "2026-06-29T10:00:00Z", "version": "2", "tags": "billing",
 				}}},
 				{"id": "u2", "payload": map[string]any{"document": "Deploys on Friday", "metadata": map[string]any{
 					"source_id": "memory:2", "type": "memory", "author": "agent:y", "updated_at": "2026-06-29T12:00:00Z", "version": "1",
@@ -459,6 +460,9 @@ func TestRepositoryListMemories(t *testing.T) {
 	}
 	if mems[1].Author != "agent:x" || mems[1].Version != "2" || mems[1].Tags != "billing" || mems[1].Document != "Acme on legacy billing" {
 		t.Fatalf("memory fields = %+v", mems[1])
+	}
+	if mems[1].Namespace != "team:billing" || mems[1].CreatedAt != "2026-06-01T09:00:00Z" {
+		t.Fatalf("namespace/created_at not surfaced: %+v", mems[1])
 	}
 }
 
