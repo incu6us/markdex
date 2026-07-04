@@ -122,7 +122,8 @@ make docker-down    # stop and remove containers/network (ARGS=-v also drops vol
   H1 is a "preamble" topic; a file with no H1 stays a single whole-file chunk.
 - **Recursion is size-driven** — within a topic, the splitter only sub-divides when a section
   exceeds the per-request `max_chars` runes: `H2 → H3 → … → sliding window with overlap`. The
-  splitter is **code-fence aware** — a `#` inside a ``` ``` block is not treated as a heading.
+  splitter is **code-aware per CommonMark** — a `#` inside a fenced block (``` ``` or `~~~`,
+  marker type and length respected) or inside 4-space-indented code is not treated as a heading.
 - **Hybrid embeddings** — each chunk is embedded by BGE-M3 into a **dense** vector (1024-dim,
   cosine) *and* a **sparse** lexical vector. Both are stored as named vectors so search can
   fuse semantic similarity with exact-term matching.
@@ -226,7 +227,9 @@ A request `source` is one of:
   — with a token, files are pulled through the authenticated contents API
   (`/repos/{o}/{r}/contents/{path}`) instead of `raw.githubusercontent.com`.
   Add `"prune": true` (UI: *remove deleted files*) to **reconcile** — delete chunks for files
-  that no longer exist in the repo, scoped to that repo so other sources are untouched.
+  that no longer exist in the repo. Pruning is scoped to **what was listed** (repo, ref, and
+  subpath), so re-ingesting a subpath or another branch never deletes chunks for files that
+  still exist, and other sources in the collection are untouched.
 - `{ "type": "upload_dir", "files": [{ "name", "content" }, …] }` — ingests **a local folder**
   in one job. The UI's **Local folder** tab reads every `.md` in a picked folder client-side
   (no server-side path / volume mount needed); empty files are skipped.
@@ -412,7 +415,8 @@ markdex stack must be running for it to work.
 
    Inside a session, `/mcp` shows connection status and the exposed tools. Then just ask
    naturally — e.g. *"list the markdex collections, then search go-style-guide for error
-   wrapping."* The tools are read-only, so they run without write-permission prompts.
+   wrapping."* The discovery/retrieval tools are read-only and run without write-permission
+   prompts; `remember`/`forget` are writes and prompt accordingly.
 
    Remove it with `claude mcp remove markdex`.
 
