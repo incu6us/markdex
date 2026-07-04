@@ -27,8 +27,9 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       section (all chunks sharing `source_id` + `heading_path`, de-overlapped) and returns it
       in place of the matched chunk. Verified live (2 KB chunk → 8 KB section). Search-UI toggle.
 - [x] **Expose retrieval as MCP tools** — `cmd/mcp` is an MCP (stdio) server on the official
-      [`go-sdk`](https://github.com/modelcontextprotocol/go-sdk), exposing three read-only tools
-      (`search`, `list_collections`, `list_headings`) over the REST API via the
+      [`go-sdk`](https://github.com/modelcontextprotocol/go-sdk), exposing four read-only tools
+      (`search` — including the REST `filter` param, e.g. `{"type": "memory"}` — plus
+      `list_collections`, `list_headings`, `list_memories`) over the REST API via the
       `markdexclient` adapter; register with `claude mcp add markdex -- go run ./cmd/mcp`.
       Typed I/O + structured output + tool annotations; protocol-version negotiation handled by
       the SDK. Verified end-to-end (initialize → tools/list → call).
@@ -117,7 +118,12 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
 
 - [ ] **Authentication / authorization** — the API is currently open (anyone reachable can
       create/overwrite/wipe collections). Add auth; consider per-collection / doc-level ACLs
-      for multi-tenant agents.
+      for multi-tenant agents. Note: the `requireAuth` seam wraps only the memory write
+      routes today — ingest, collection create/delete, and eval must be brought under it too.
+- [x] **Request hardening** — collection names validated (`^[A-Za-z0-9._-]+$`) on every
+      entry point (the qdrant adapter concatenates them into URLs — path-injection guard);
+      request bodies capped via `http.MaxBytesReader` (1 MiB, 64 MiB for ingest/preview, 413
+      on breach); Qdrant bound to loopback in compose (it ships unauthenticated). (1bd0407)
 - [ ] **Observability** — OpenTelemetry traces + metrics (latency, throughput, error rate)
       at the HTTP/job boundary; structured logs already in place.
 - [ ] **Durable job store** — ingestion jobs are in-memory and lost on restart; persist them.
@@ -143,6 +149,11 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
 
 - [x] Markdown ingestion: structural H1 split → recursive H2/H3 → sliding-window-with-overlap;
       code-fence aware; every chunk fits the model window.
+      **CommonMark-correctness fix (65467d5):** headings capped at 3 leading spaces (a `#`
+      inside 4-space-indented code is code, not a topic); fences close only on a bare run of
+      the same marker character at least as long as the opener (a `~~~` inside a backtick
+      fence, or a shorter inner run, no longer ends it). Collections ingested before the fix
+      keep their old chunks until re-ingested (re-ingest is idempotent).
 - [x] Idempotent re-ingest: delete-by-`source_id` then upsert (no orphaned chunks on change).
 - [x] Payload `document` + `metadata` (`path`, `source_id`, `title`, `heading_path`,
       `chunk_index`) under named vectors `bge-m3-dense` + `bge-m3-sparse`.

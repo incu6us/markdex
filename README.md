@@ -419,13 +419,14 @@ markdex stack must be running for it to work.
 
 ### Tools
 
-Three **read-only** discovery/retrieval tools and two **write** tools for agent memory:
+Four **read-only** discovery/retrieval tools and two **write** tools for agent memory:
 
 | Tool | Input | Returns |
 | --- | --- | --- |
 | `list_collections` | — | every collection with its point count + dimension |
 | `list_headings` | `{ collection }` | the collection's heading paths (valid `heading_path` filters) |
-| `search` | `{ collection, query, top_k?, expand? }` | reranked chunks, or full sections with `expand` (`top_k` defaults to 8, capped at 100) |
+| `search` | `{ collection, query, top_k?, expand?, filter? }` | reranked chunks, or full sections with `expand` (`top_k` defaults to 8, capped at 100); `filter` is the REST API's exact-match metadata filter, e.g. `{"type": "memory"}` to search only memories |
+| `list_memories` | `{ collection }` | the collection's memories (newest first) with `source_id`, author, version, tags — the id `forget` needs |
 | `remember` | `{ collection, text, author?, namespace?, tags? }` | `{ source_id, superseded, version }` — stores a fact (supersede-or-append) |
 | `forget` | `{ collection, id }` | deletes a memory by `source_id` |
 
