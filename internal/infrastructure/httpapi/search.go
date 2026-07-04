@@ -35,12 +35,15 @@ type searchResponse struct {
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	var req searchRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+	if err := decodeJSON(w, r, &req, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(req.Collection) == "" || strings.TrimSpace(req.Query) == "" {
 		writeError(w, http.StatusBadRequest, "collection and query are required")
+		return
+	}
+	if !checkCollectionName(w, req.Collection) {
 		return
 	}
 

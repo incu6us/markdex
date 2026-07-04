@@ -185,12 +185,15 @@ type ingestResponse struct {
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	var req ingestRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+	if err := decodeJSON(w, r, &req, maxIngestBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(req.Collection) == "" {
 		writeError(w, http.StatusBadRequest, "collection is required")
+		return
+	}
+	if !checkCollectionName(w, req.Collection) {
 		return
 	}
 

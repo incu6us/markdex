@@ -69,12 +69,15 @@ func (s *Server) handleRemember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req rememberRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+	if err := decodeJSON(w, r, &req, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(req.Collection) == "" || strings.TrimSpace(req.Text) == "" {
 		writeError(w, http.StatusBadRequest, "collection and text are required")
+		return
+	}
+	if !checkCollectionName(w, req.Collection) {
 		return
 	}
 	if req.SupersedeThreshold != nil && (*req.SupersedeThreshold <= 0 || *req.SupersedeThreshold > 1) {
@@ -114,6 +117,9 @@ func (s *Server) handleListMemories(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"memories": []Memory{}})
 		return
 	}
+	if !checkCollectionName(w, r.PathValue("name")) {
+		return
+	}
 	memories, err := s.memoryLister.ListMemories(r.Context(), r.PathValue("name"))
 	if err != nil {
 		s.logger.Error("list memories failed", "collection", r.PathValue("name"), "err", err)
@@ -136,6 +142,9 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 	collection := strings.TrimSpace(r.URL.Query().Get("collection"))
 	if id == "" || collection == "" {
 		writeError(w, http.StatusBadRequest, "memory id and ?collection are required")
+		return
+	}
+	if !checkCollectionName(w, collection) {
 		return
 	}
 

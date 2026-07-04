@@ -167,7 +167,25 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
-func decodeJSON(r *http.Request, v any) error {
+// Body limits: one request must not be able to OOM the process. Ingest and
+// preview carry whole documents (upload_dir: up to maxUploadFiles files);
+// everything else is small JSON.
+const (
+	maxBodyBytes       = 1 << 20  // 1 MiB
+	maxIngestBodyBytes = 64 << 20 // 64 MiB
+)
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	return json.NewDecoder(r.Body).Decode(v)
+}
+
+func writeDecodeError(w http.ResponseWriter, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid json body")
 }

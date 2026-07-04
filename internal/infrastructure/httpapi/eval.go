@@ -40,12 +40,15 @@ type evalResponse struct {
 
 func (s *Server) handleEval(w http.ResponseWriter, r *http.Request) {
 	var req evalRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+	if err := decodeJSON(w, r, &req, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(req.Collection) == "" || len(req.Queries) == 0 {
 		writeError(w, http.StatusBadRequest, "collection and queries are required")
+		return
+	}
+	if !checkCollectionName(w, req.Collection) {
 		return
 	}
 	topK := req.TopK

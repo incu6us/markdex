@@ -27,8 +27,8 @@ type previewResponse struct {
 
 func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	var req previewRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+	if err := decodeJSON(w, r, &req, maxIngestBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 
