@@ -251,7 +251,8 @@ mirroring the existing read-only tools.
   superseded facts is ever needed.
 - **Memory decay (TTL)** — expire stale memories; needs `created_at`-based reconciliation.
 - **Promote memory → curated doc** — a path to graduate a high-value memory into an ingested doc.
-- **Supersede scope** — currently global within `type="memory"`; consider scoping to `namespace`
-  (would also recover the one calibration miss where a true paraphrase scored below 0.97).
+- **Supersede scope** — ~~currently global~~ **shipped**: the probe is scoped to the write's
+  `namespace` when one is given (unnamespaced writes probe unscoped), and a supersede now
+  inherits `author`/`namespace`/`tags` the new write omits instead of dropping them.
 - **Recover sub-threshold paraphrases** — e.g. probe the contextual text, or a small ensemble, for
   the ~0.77-scoring "same fact" cases the single cutoff misses.

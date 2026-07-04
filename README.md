@@ -267,9 +267,11 @@ curl -s -X POST http://localhost:4334/api/memories -H 'Content-Type: application
 
 - **Semantic supersede** — before writing, markdex probes the collection for a near-identical
   existing memory (lexical word-shingle Jaccard, then the cross-encoder rerank score above
-  `-supersede-threshold`). A match is **replaced in place** (same `source_id`, `version` bumped);
+  `-supersede-threshold`). A match is **replaced in place** (same `source_id`, `version` bumped,
+  and `author`/`namespace`/`tags` the new write omits are inherited from the superseded memory);
   otherwise a new memory is appended. So re-recording a paraphrased fact updates it instead of
-  piling up duplicates.
+  piling up duplicates. The probe is scoped to the write's `namespace` when one is given —
+  near-identical facts in different namespaces never replace each other.
 - **Configurable target** — the `collection` can be a dedicated `*-memory` collection (created on
   first write) **or** an existing doc collection. The supersede probe is always filtered to
   `type="memory"`, so a memory can **never** replace (delete) a curated document — even in a

@@ -269,3 +269,80 @@ func TestMemoryForget(t *testing.T) {
 		t.Fatalf("deleted = %v in %q", store.deleted, store.gotCollection)
 	}
 }
+
+// A supersede is an in-place update: metadata the new write omits must be
+// inherited from the superseded memory, not silently dropped; provided fields
+// still override.
+func TestMemoryRememberSupersedeInheritsOmittedMetadata(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeMemorySearcher{hits: []domain.SearchHit{{
+		Score:    0.99,
+		Document: "Acme is on the legacy billing plan",
+		Metadata: map[string]string{
+			"source_id":  "memory:prior",
+			"version":    "2",
+			"created_at": "2026-01-01T00:00:00Z",
+			"author":     "agent:original",
+			"namespace":  "team:billing",
+			"tags":       "billing,acme",
+		},
+	}}}
+	store := newFakeMemoryStore()
+	svc := newMemoryService(t, searcher, store)
+
+	res, err := svc.Remember(context.Background(), application.RememberParams{
+		Collection: "team-memory",
+		Text:       "Acme uses the legacy billing plan",
+		Tags:       "billing,acme,legacy", // provided → overrides
+		// Author and Namespace omitted → inherited
+	})
+	if err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+	if !res.Superseded || res.Version != 3 {
+		t.Fatalf("result = %+v, want superseded v3", res)
+	}
+
+	md := store.replaced["memory:prior"][0].Chunk.Metadata()
+	if md["author"] != "agent:original" {
+		t.Fatalf("author = %q, want inherited agent:original", md["author"])
+	}
+	if md["namespace"] != "team:billing" {
+		t.Fatalf("namespace = %q, want inherited team:billing", md["namespace"])
+	}
+	if md["tags"] != "billing,acme,legacy" {
+		t.Fatalf("tags = %q, want the provided override", md["tags"])
+	}
+}
+
+// A namespaced write must only probe (and thus supersede) memories in the same
+// namespace — near-identical facts in different namespaces are different facts.
+func TestMemoryRememberProbeScopedToNamespace(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeMemorySearcher{}
+	svc := newMemoryService(t, searcher, newFakeMemoryStore())
+
+	if _, err := svc.Remember(context.Background(), application.RememberParams{
+		Collection: "team-memory", Text: "fact", Namespace: "team:payments",
+	}); err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+	if got := searcher.gotFilter.Match["namespace"]; got != "team:payments" {
+		t.Fatalf("probe namespace filter = %q, want team:payments", got)
+	}
+	if searcher.gotFilter.Match["type"] != "memory" {
+		t.Fatal("clobber guard lost: probe must still filter type=memory")
+	}
+
+	// Without a namespace the probe stays unscoped (matches today's behavior).
+	if _, err := svc.Remember(context.Background(), application.RememberParams{
+		Collection: "team-memory", Text: "fact",
+	}); err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+	if _, ok := searcher.gotFilter.Match["namespace"]; ok {
+		t.Fatalf("unnamespaced probe must not carry a namespace filter, got %v", searcher.gotFilter.Match)
+	}
+}

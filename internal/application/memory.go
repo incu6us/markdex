@@ -137,9 +137,17 @@ func (s *MemoryService) Remember(ctx context.Context, p RememberParams) (Remembe
 		return RememberResult{}, err
 	}
 
-	// Supersede probe — memories only (the clobber guard).
+	// Supersede probe — memories only (the clobber guard), scoped to the write's
+	// namespace when one is given: near-identical facts in different namespaces
+	// are different facts and must not replace each other. A write without a
+	// namespace probes unscoped (it may update a namespaced fact — the namespace
+	// survives via metadata inheritance below).
+	probe := map[string]string{"type": memoryType}
+	if ns := strings.TrimSpace(p.Namespace); ns != "" {
+		probe["namespace"] = ns
+	}
 	candidates, err := s.searcher.Search(ctx, collection, text, probeTopK,
-		domain.Filter{Match: map[string]string{"type": memoryType}}, false)
+		domain.Filter{Match: probe}, false)
 	if err != nil {
 		return RememberResult{}, err
 	}
@@ -157,6 +165,7 @@ func (s *MemoryService) Remember(ctx context.Context, p RememberParams) (Remembe
 	supersededID := ""
 	createdAt := now
 
+	author, namespace, tags := p.Author, p.Namespace, p.Tags
 	if match := s.bestSupersede(text, candidates, threshold); match != nil {
 		sourceID = match.Metadata["source_id"]
 		supersededID = sourceID
@@ -164,6 +173,11 @@ func (s *MemoryService) Remember(ctx context.Context, p RememberParams) (Remembe
 		if c := match.Metadata["created_at"]; c != "" {
 			createdAt = c // preserve the original creation time across supersedes
 		}
+		// A supersede is an in-place update: metadata the new write omits is
+		// inherited from the superseded memory, not dropped.
+		author = firstNonEmpty(author, match.Metadata["author"])
+		namespace = firstNonEmpty(namespace, match.Metadata["namespace"])
+		tags = firstNonEmpty(tags, match.Metadata["tags"])
 	}
 
 	meta := map[string]string{
@@ -172,9 +186,9 @@ func (s *MemoryService) Remember(ctx context.Context, p RememberParams) (Remembe
 		"updated_at": now,
 		"version":    strconv.Itoa(version),
 	}
-	putIfSet(meta, "author", p.Author)
-	putIfSet(meta, "namespace", p.Namespace)
-	putIfSet(meta, "tags", p.Tags)
+	putIfSet(meta, "author", author)
+	putIfSet(meta, "namespace", namespace)
+	putIfSet(meta, "tags", tags)
 	putIfSet(meta, "supersedes", supersededID)
 
 	vectors, err := s.embedder.Embed(ctx, []string{text}, domain.DocumentKind)
@@ -228,6 +242,13 @@ func (s *MemoryService) bestSupersede(text string, candidates []domain.SearchHit
 		}
 	}
 	return nil
+}
+
+func firstNonEmpty(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
 }
 
 func putIfSet(m map[string]string, key, value string) {
