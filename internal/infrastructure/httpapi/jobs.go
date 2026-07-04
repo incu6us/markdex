@@ -32,6 +32,8 @@ type Job struct {
 	Total      int      `json:"total"`
 	Ingested   int      `json:"ingested"`
 	Error      string   `json:"error,omitempty"`
+
+	doneAt time.Time // when the job reached a terminal state; drives TTL eviction
 }
 
 // FileSpec is one in-memory file (name + content), used for folder upload.
@@ -116,11 +118,21 @@ type task struct {
 	spec IngestSpec
 }
 
+// ErrQueueFull is returned by Submit when the ingest queue has no free slot;
+// callers should surface it as 503 and let the client retry.
+var ErrQueueFull = errors.New("ingestion queue is full")
+
+// jobTTL is how long a terminal (succeeded/failed) job stays queryable before
+// being evicted; without it the jobs map grows for the life of the process.
+const jobTTL = time.Hour
+
 type JobManager struct {
 	ingester Ingester
 	logger   *slog.Logger
 	queue    chan task
 	wg       sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
 
 	mu   sync.Mutex
 	jobs map[string]*Job
@@ -130,35 +142,88 @@ func NewJobManager(ingester Ingester, logger *slog.Logger) *JobManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &JobManager{
 		ingester: ingester,
 		logger:   logger,
 		queue:    make(chan task, 64),
 		jobs:     make(map[string]*Job),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
 func (m *JobManager) Start() {
 	m.wg.Go(func() {
-		for t := range m.queue {
-			m.run(t)
+		for {
+			select {
+			case <-m.ctx.Done():
+				m.failQueued()
+				return
+			case t := <-m.queue:
+				m.run(t)
+			}
 		}
 	})
 }
 
+// Stop cancels the in-flight job (its context aborts the next network call)
+// and fails still-queued jobs instead of running the whole backlog to
+// completion — shutdown must not take hours. The queue is never closed, so a
+// racing Submit degrades to ErrQueueFull rather than a send-on-closed panic.
 func (m *JobManager) Stop() {
-	close(m.queue)
+	m.cancel()
 	m.wg.Wait()
 }
 
-func (m *JobManager) Submit(spec IngestSpec) string {
+// Done is closed when the manager shuts down; long-lived watchers (SSE job
+// streams) select on it so open connections don't stall graceful shutdown.
+func (m *JobManager) Done() <-chan struct{} {
+	return m.ctx.Done()
+}
+
+func (m *JobManager) failQueued() {
+	for {
+		select {
+		case t := <-m.queue:
+			m.update(t.id, func(job *Job) {
+				job.State = JobFailed
+				job.Error = "canceled: server shutting down"
+			})
+		default:
+			return
+		}
+	}
+}
+
+func (m *JobManager) Submit(spec IngestSpec) (string, error) {
+	if m.ctx.Err() != nil {
+		return "", ErrQueueFull
+	}
 	id := uuid.NewString()
 	m.mu.Lock()
+	m.sweepLocked(time.Now())
 	m.jobs[id] = &Job{ID: id, Collection: spec.Collection, State: JobPending}
 	m.mu.Unlock()
 
-	m.queue <- task{id: id, spec: spec}
-	return id
+	select {
+	case m.queue <- task{id: id, spec: spec}:
+		return id, nil
+	default:
+		m.mu.Lock()
+		delete(m.jobs, id)
+		m.mu.Unlock()
+		return "", ErrQueueFull
+	}
+}
+
+// sweepLocked evicts terminal jobs older than jobTTL. Called with mu held.
+func (m *JobManager) sweepLocked(now time.Time) {
+	for id, job := range m.jobs {
+		if !job.doneAt.IsZero() && now.Sub(job.doneAt) > jobTTL {
+			delete(m.jobs, id)
+		}
+	}
 }
 
 func (m *JobManager) Get(id string) (Job, bool) {
@@ -181,7 +246,7 @@ func (m *JobManager) run(t task) {
 		})
 	}
 
-	ingested, err := m.ingester.Ingest(context.Background(), t.spec, report)
+	ingested, err := m.ingester.Ingest(m.ctx, t.spec, report)
 	m.update(t.id, func(job *Job) {
 		if err != nil {
 			job.State = JobFailed
@@ -201,6 +266,9 @@ func (m *JobManager) update(id string, mutate func(*Job)) {
 	defer m.mu.Unlock()
 	if job, ok := m.jobs[id]; ok {
 		mutate(job)
+		if (job.State == JobSucceeded || job.State == JobFailed) && job.doneAt.IsZero() {
+			job.doneAt = time.Now()
+		}
 	}
 }
 
@@ -281,7 +349,12 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, ingestResponse{JobID: s.jobs.Submit(spec)})
+	jobID, err := s.jobs.Submit(spec)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "ingestion queue is full; retry later")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, ingestResponse{JobID: jobID})
 }
 
 func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +402,10 @@ func (s *Server) handleJobStream(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case <-r.Context().Done():
+			return
+		case <-s.jobs.Done():
+			// Manager is shutting down — end the stream so open connections
+			// don't hold the HTTP server past its shutdown deadline.
 			return
 		case <-ticker.C:
 		}
