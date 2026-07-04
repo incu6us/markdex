@@ -45,8 +45,8 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
       the live stack: append → search → supersede (paraphrase, point count flat, `version` 2) →
       append (unrelated, +1) → forget (gone from search); plus the clobber guard (memory into the
       115-pt `go-style-guide` doc collection: 115→116→115, no doc deleted, point tagged
-      `type=memory`). Ships **open**; all writes route through a no-op `requireAuth` seam so auth is a
-      one-place follow-up (Tier 4). Plan in [memory_plan.md](memory_plan.md).
+      `type=memory`). All writes route through the `requireAuth` seam — since 581a391 it enforces
+      `MARKDEX_API_TOKEN` bearer auth when configured (Tier 4). Plan in [memory_plan.md](memory_plan.md).
 - [x] **Collections management UI** — dedicated **Collections** tab listing every collection
       (name, points, dimension) with create + delete; delete asks for a single confirmation and
       is backed by `DELETE /api/collections/{name}` → Qdrant `Repository.Delete`. Selected
@@ -108,18 +108,23 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
 - [ ] **Scheduled / incremental re-sync** — refresh sources on a schedule, not just manually.
 - [x] **Collection reconciliation** — re-ingesting a `github_repo` with `prune: true` deletes
       chunks for files that no longer exist in the repo (idempotent re-ingest only replaced docs
-      it *re*-ingested, leaving vanished ones as orphans). Scoped to the repo's raw-URL prefix
-      (`domain.SourcesToPrune`) so other sources in the collection are never touched; backed by
+      it *re*-ingested, leaving vanished ones as orphans). Scoped to the **listing's common
+      URL prefix** — carrying ref and subpath, so re-ingesting a subpath or another branch can
+      never delete chunks for files that still exist (was repo-wide: a data-loss bug, fixed in
+      5baa6b5) — and other sources in the collection are never touched; backed by
       `Repository.ListSources` + `DeleteSources`. UI: a "remove deleted files" checkbox on the
       GitHub repo source. Verified e2e (whole repo 170 pts → re-ingest `docs/` subpath with prune
       → 30 pts, README's chunks gone from search).
 
 ## Tier 4 — Production hardening
 
-- [ ] **Authentication / authorization** — the API is currently open (anyone reachable can
-      create/overwrite/wipe collections). Add auth; consider per-collection / doc-level ACLs
-      for multi-tenant agents. Note: the `requireAuth` seam wraps only the memory write
-      routes today — ingest, collection create/delete, and eval must be brought under it too.
+- [x] **Authentication (shared token)** — every mutating route (ingest, collection
+      create/delete, memories, eval) goes through the `requireAuth` seam, which enforces
+      `Authorization: Bearer $MARKDEX_API_TOKEN` (constant-time compare) when the env var is
+      set; unset keeps the single-user default open. Plumbed through compose, markdexclient,
+      and cmd/mcp. (581a391)
+      Remaining: the web UI doesn't send the token yet (UI writes 401 on tokened instances);
+      per-team keys / per-collection ACLs for multi-tenant agents are still open.
 - [x] **Request hardening** — collection names validated (`^[A-Za-z0-9._-]+$`) on every
       entry point (the qdrant adapter concatenates them into URLs — path-injection guard);
       request bodies capped via `http.MaxBytesReader` (1 MiB, 64 MiB for ingest/preview, 413
@@ -127,6 +132,11 @@ hybrid (dense + sparse) candidate retrieval fused with RRF, then cross-encoder r
 - [ ] **Observability** — OpenTelemetry traces + metrics (latency, throughput, error rate)
       at the HTTP/job boundary; structured logs already in place.
 - [ ] **Durable job store** — ingestion jobs are in-memory and lost on restart; persist them.
+- [x] **Job-manager robustness** — `Submit` no longer blocks on a full queue (503 instead);
+      jobs run under a cancellable context so `Stop()` aborts the in-flight ingest and fails
+      queued ones instead of draining the backlog (shutdown no longer hangs); terminal jobs
+      are evicted after 1h (the map was unbounded); SSE job streams exit on shutdown. First
+      direct JobManager tests, under -race. (b9487a0)
 - [ ] **Concurrency / scale** — single-worker serial ingestion today (embedder is not
       concurrency-safe); add safe parallelism / batching across documents.
 - [ ] **Rate limiting** on ingest/search.

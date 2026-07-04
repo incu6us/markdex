@@ -243,9 +243,10 @@ mirroring the existing read-only tools.
 
 ## Deferred / follow-ups
 
-- **Auth** — the immediate follow-up; gate the write routes at the `requireAuth` seam
-  (shared secret → per-team keys → doc-level ACLs). Tier 4 in [roadmap.md](roadmap.md). **This is the
-  only remaining must-do before shared/multi-tenant use** — everything else below is optional.
+- **Auth** — ~~the immediate follow-up~~ **shipped (581a391)**: the `requireAuth` seam now
+  enforces `MARKDEX_API_TOKEN` bearer auth on every mutating route when configured (shared
+  secret tier). Per-team keys → doc-level ACLs remain future work; the web UI does not send
+  the token yet. Tier 4 in [roadmap.md](roadmap.md).
 - **Full history** — append-with-tombstone instead of in-place supersede, if an audit log of
   superseded facts is ever needed.
 - **Memory decay (TTL)** — expire stale memories; needs `created_at`-based reconciliation.

@@ -178,7 +178,9 @@ dimension + vector names from the sidecar's `/info` to size collections.
 | `-supersede-threshold` | `0.97`        | Memory write: rerank-score cutoff above which a new memory replaces a near-identical one (higher = more conservative). Calibrated; tune per corpus. |
 
 `QDRANT_API_KEY` is read from the environment and sent as the `api-key` header when set.
-Per-document `max_chars` and `overlap` are set per ingest request.
+`MARKDEX_API_TOKEN`, when set, requires `Authorization: Bearer <token>` on every mutating
+route (unset = open, single-user default). Per-document `max_chars` and `overlap` are set
+per ingest request.
 
 ### Tuning search latency
 
@@ -277,9 +279,11 @@ curl -s -X POST http://localhost:4334/api/memories -H 'Content-Type: application
 - **UI** — the **Memory** tab exposes all of this: a remember form (with an advanced merge-threshold
   slider), the collection's memories list, and a per-memory *forget* button.
 
-> Write-back currently ships **open** (like the rest of the API). All write routes pass through a
-> single `requireAuth` seam (a no-op today) so adding token auth is a one-place change — it is the
-> immediate follow-up before any shared/multi-tenant use.
+> **Auth:** set `MARKDEX_API_TOKEN` and every mutating route (ingest, collection
+> create/delete, memories, eval) requires `Authorization: Bearer <token>`; read routes stay
+> open. Unset keeps the whole API open (single-user default). The MCP server forwards the
+> same env var. Known limitation: the web UI does not send the token yet, so UI writes 401
+> on a tokened instance — use the API/MCP for writes there.
 
 The React UI lives in `web/` (Vite). In production it is built into `web/dist` and served by
 the Go backend from the same origin (`make run`, or `make ui-build` + `go run .`). For hot
