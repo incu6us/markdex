@@ -192,3 +192,66 @@ func hasHeadingPathPrefix(chunks []domain.Chunk, prefix string) bool {
 	}
 	return false
 }
+
+// CommonMark: an ATX heading may be indented at most 3 spaces; 4+ is indented
+// code. A "#" comment inside indented code must not become a topic.
+func TestSplitIgnoresHeadingsInIndentedCode(t *testing.T) {
+	t.Parallel()
+
+	content := "# Real\nintro\n\n    # not a heading, indented code\n    code()\n\ntail"
+	chunks := split(t, 2000, 0, content)
+
+	if len(chunks) != 1 {
+		t.Fatalf("got %d chunks, want 1 (indented code must not split)", len(chunks))
+	}
+	if chunks[0].Title() != "Real" {
+		t.Fatalf("title = %q, want Real", chunks[0].Title())
+	}
+	if !strings.Contains(chunks[0].Content(), "# not a heading, indented code") {
+		t.Fatalf("indented code lost: %q", chunks[0].Content())
+	}
+}
+
+// A tilde line inside a backtick fence is content, not a fence toggle
+// (CommonMark: the closing fence must use the same marker character).
+func TestSplitFenceNotClosedByOtherMarker(t *testing.T) {
+	t.Parallel()
+
+	content := "# Real\nbefore\n```\n~~~\n# inside fence\n```\nafter"
+	chunks := split(t, 2000, 0, content)
+
+	if len(chunks) != 1 {
+		t.Fatalf("got %d chunks, want 1 (tilde must not close a backtick fence)", len(chunks))
+	}
+	if !strings.Contains(chunks[0].Content(), "# inside fence") {
+		t.Fatalf("fenced content lost: %q", chunks[0].Content())
+	}
+}
+
+// A shorter backtick run inside a longer fence is content, not a close
+// (CommonMark: the closing fence must be at least as long as the opener).
+func TestSplitFenceNotClosedByShorterRun(t *testing.T) {
+	t.Parallel()
+
+	content := "# Real\nbefore\n````markdown\n```\n# inside outer fence\n```\n````\nafter"
+	chunks := split(t, 2000, 0, content)
+
+	if len(chunks) != 1 {
+		t.Fatalf("got %d chunks, want 1 (inner ``` must not close a ```` fence)", len(chunks))
+	}
+	if !strings.Contains(chunks[0].Content(), "# inside outer fence") {
+		t.Fatalf("fenced content lost: %q", chunks[0].Content())
+	}
+}
+
+// Tilde fences suppress headings the same way backtick fences do.
+func TestSplitIgnoresHeadingsInsideTildeFence(t *testing.T) {
+	t.Parallel()
+
+	content := "# Real\nbefore\n~~~\n# not a heading\n~~~\nafter"
+	chunks := split(t, 2000, 0, content)
+
+	if len(chunks) != 1 {
+		t.Fatalf("got %d chunks, want 1 (tilde fence must not split)", len(chunks))
+	}
+}

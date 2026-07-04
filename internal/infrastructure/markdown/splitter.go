@@ -7,11 +7,7 @@ import (
 	"github.com/incu6us/markdex/internal/domain"
 )
 
-const (
-	defaultMaxRunes = 2000
-	fenceMarker     = "```"
-	tildeMarker     = "~~~"
-)
+const defaultMaxRunes = 2000
 
 type Splitter struct {
 	maxRunes int
@@ -154,15 +150,23 @@ func (s *Splitter) window(text, title, headingPath string) []piece {
 func scan(content string) []lineInfo {
 	raw := strings.Split(content, "\n")
 	lines := make([]lineInfo, len(raw))
-	inFence := false
+	openFence := "" // the marker run that opened the current fence; "" = outside
 	for i, text := range raw {
 		trimmed := strings.TrimSpace(text)
-		if strings.HasPrefix(trimmed, fenceMarker) || strings.HasPrefix(trimmed, tildeMarker) {
-			inFence = !inFence
-			lines[i] = lineInfo{text: text}
-			continue
-		}
-		if inFence {
+		if openFence == "" {
+			if run := fenceRun(trimmed); run != "" {
+				openFence = run
+				lines[i] = lineInfo{text: text}
+				continue
+			}
+		} else {
+			// CommonMark: a fence closes only on a bare run of the SAME marker
+			// character, at least as long as the opener — a "~~~" line inside a
+			// backtick fence, or a shorter run, is content.
+			if run := fenceRun(trimmed); run == trimmed && run != "" &&
+				run[0] == openFence[0] && len(run) >= len(openFence) {
+				openFence = ""
+			}
 			lines[i] = lineInfo{text: text}
 			continue
 		}
@@ -172,8 +176,30 @@ func scan(content string) []lineInfo {
 	return lines
 }
 
+// fenceRun returns the leading fence marker run ("```", "~~~~", …) when the
+// line starts one, or "" otherwise. An opener may carry an info string after
+// the run ("```go").
+func fenceRun(trimmed string) string {
+	if len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return ""
+	}
+	c, n := trimmed[0], 0
+	for n < len(trimmed) && trimmed[n] == c {
+		n++
+	}
+	if n < 3 {
+		return ""
+	}
+	return trimmed[:n]
+}
+
 func parseHeading(line string) (int, string, bool) {
 	trimmed := strings.TrimLeft(line, " ")
+	// CommonMark: an ATX heading may be indented at most 3 spaces; 4+ is
+	// indented code, so "#" comments inside it must not become headings.
+	if len(line)-len(trimmed) > 3 {
+		return 0, "", false
+	}
 	level := 0
 	for level < len(trimmed) && trimmed[level] == '#' {
 		level++
