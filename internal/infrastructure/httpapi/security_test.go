@@ -1,7 +1,11 @@
 package httpapi_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -69,4 +73,90 @@ func TestOversizedBodyRejected(t *testing.T) {
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
+}
+
+// With MARKDEX_API_TOKEN configured, every mutating route requires
+// Authorization: Bearer <token>; read routes stay open.
+func TestTokenAuthGatesMutatingRoutes(t *testing.T) {
+	handler := newTestServer(t, testDeps{
+		token:        "s3cret",
+		creator:      &stubCreator{},
+		deleter:      &stubDeleter{},
+		memorizer:    &stubMemorizer{},
+		memoryLister: &stubMemoryLister{},
+		searcher:     &stubSearcher{},
+		headings:     stubHeadings{},
+	})
+
+	mutating := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{"ingest", http.MethodPost, "/api/ingest", map[string]any{"collection": "c", "source": map[string]any{"type": "upload", "name": "a.md", "content": "# A\nbody"}}},
+		{"create collection", http.MethodPost, "/api/collections", map[string]any{"name": "c"}},
+		{"delete collection", http.MethodDelete, "/api/collections/c", nil},
+		{"remember", http.MethodPost, "/api/memories", map[string]any{"collection": "c", "text": "fact"}},
+		{"forget", http.MethodDelete, "/api/memories/id1?collection=c", nil},
+		{"eval", http.MethodPost, "/api/eval", map[string]any{"collection": "c", "queries": []map[string]any{{"query": "q"}}}},
+	}
+	for _, tc := range mutating {
+		t.Run(tc.name+" without token", func(t *testing.T) {
+			rec := doRequest(t, handler, tc.method, tc.path, tc.body)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d (body: %s)", rec.Code, rec.Body.String())
+			}
+		})
+		t.Run(tc.name+" with wrong token", func(t *testing.T) {
+			rec := doAuthedRequest(t, handler, tc.method, tc.path, tc.body, "wrong")
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d (body: %s)", rec.Code, rec.Body.String())
+			}
+		})
+		t.Run(tc.name+" with correct token", func(t *testing.T) {
+			rec := doAuthedRequest(t, handler, tc.method, tc.path, tc.body, "s3cret")
+			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+				t.Fatalf("expected auth to pass, got %d (body: %s)", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	// Read routes stay open with a token configured.
+	for _, path := range []string{"/api/collections", "/api/collections/c/headings", "/api/collections/c/memories"} {
+		rec := doRequest(t, handler, http.MethodGet, path, nil)
+		if rec.Code == http.StatusUnauthorized {
+			t.Fatalf("GET %s: read route must stay open, got 401", path)
+		}
+	}
+	rec := doRequest(t, handler, http.MethodPost, "/api/search", map[string]any{"collection": "c", "query": "q"})
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatal("POST /api/search: read route must stay open, got 401")
+	}
+}
+
+// Without a configured token the API stays open (single-user default).
+func TestNoTokenKeepsAPIOpen(t *testing.T) {
+	handler := newTestServer(t, testDeps{creator: &stubCreator{}})
+	rec := doRequest(t, handler, http.MethodPost, "/api/collections", map[string]any{"name": "c"})
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("expected open API without token, got 401")
+	}
+}
+
+func doAuthedRequest(t *testing.T, handler http.Handler, method, path string, body any, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
 }

@@ -37,6 +37,9 @@ services:
       # Optional: raises GitHub's 60/hr unauthenticated limit and enables private
       # repos for repo ingestion. Passed through from the host env if set.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Optional: when set, mutating API routes require "Authorization: Bearer <token>".
+      # Unset keeps the API open (single-user default).
+      MARKDEX_API_TOKEN: ${MARKDEX_API_TOKEN:-}
     ports:
       - "4334:4334"
 

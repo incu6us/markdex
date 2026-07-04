@@ -43,7 +43,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	deps := &toolDeps{svc: markdexclient.New(base, &http.Client{Timeout: 60 * time.Second})}
+	client := markdexclient.New(base, &http.Client{Timeout: 60 * time.Second})
+	// Forward the API token when the markdex instance requires one on writes.
+	client.Token = os.Getenv("MARKDEX_API_TOKEN")
+	deps := &toolDeps{svc: client}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "markdex", Version: "0.2.0"}, nil)
 	deps.register(srv)
 

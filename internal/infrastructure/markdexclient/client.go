@@ -19,6 +19,9 @@ import (
 type Client struct {
 	baseURL string
 	http    *http.Client
+	// Token, when non-empty, is sent as "Authorization: Bearer <Token>" —
+	// required by markdex instances started with MARKDEX_API_TOKEN.
+	Token string
 }
 
 // New returns a Client targeting baseURL. If httpClient is nil, http.DefaultClient
@@ -190,6 +193,9 @@ func (c *Client) do(ctx context.Context, method, path string, body *bytes.Reader
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
 	resp, err := c.http.Do(req)

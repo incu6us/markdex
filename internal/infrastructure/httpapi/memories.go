@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strings"
@@ -156,9 +157,19 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// requireAuth gates the write endpoints. TODO(auth): enforce a token here — for now
-// it is a deliberate pass-through no-op (write-back ships open; auth is the immediate
-// follow-up, and routing every write through this one seam keeps it a single diff).
+// requireAuth gates the mutating endpoints. With no token configured the API
+// stays open (single-user default); with MARKDEX_API_TOKEN set, callers must
+// send "Authorization: Bearer <token>".
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return next
+	if s.token == "" {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
+			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+			return
+		}
+		next(w, r)
+	}
 }

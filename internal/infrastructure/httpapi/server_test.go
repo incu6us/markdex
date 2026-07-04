@@ -168,6 +168,7 @@ type testDeps struct {
 	headings     httpapi.HeadingsProvider
 	memorizer    httpapi.Memorizer
 	memoryLister httpapi.MemoryLister
+	token        string
 	model        httpapi.ModelInfo
 }
 
@@ -197,6 +198,7 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 		MemoryLister: deps.memoryLister,
 		Jobs:         manager,
 		Model:        deps.model,
+		Token:        deps.token,
 		Logger:       logger,
 	}).Handler()
 }

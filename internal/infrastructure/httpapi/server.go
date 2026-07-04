@@ -42,7 +42,10 @@ type Config struct {
 	Jobs         *JobManager
 	Model        ModelInfo
 	UI           fs.FS
-	Logger       *slog.Logger
+	// Token, when non-empty, is required as "Authorization: Bearer <Token>" on
+	// every mutating route. Empty keeps the API open (single-user default).
+	Token  string
+	Logger *slog.Logger
 }
 
 type Server struct {
@@ -59,6 +62,7 @@ type Server struct {
 	jobs         *JobManager
 	model        ModelInfo
 	ui           fs.FS
+	token        string
 	logger       *slog.Logger
 }
 
@@ -81,6 +85,7 @@ func NewServer(cfg Config) *Server {
 		jobs:         cfg.Jobs,
 		model:        cfg.Model,
 		ui:           cfg.UI,
+		token:        cfg.Token,
 		logger:       logger,
 	}
 }
@@ -89,16 +94,17 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/preview", s.handlePreview)
 	mux.HandleFunc("GET /api/collections", s.handleCollections)
-	mux.HandleFunc("POST /api/collections", s.handleCreateCollection)
-	mux.HandleFunc("DELETE /api/collections/{name}", s.handleDeleteCollection)
 	mux.HandleFunc("GET /api/collections/{name}/headings", s.handleHeadings)
-	mux.HandleFunc("POST /api/ingest", s.handleIngest)
-	mux.HandleFunc("POST /api/search", s.handleSearch)
-	// Write-back (agent memory) — routed through the requireAuth seam (no-op today).
 	mux.HandleFunc("GET /api/collections/{name}/memories", s.handleListMemories)
+	mux.HandleFunc("POST /api/search", s.handleSearch)
+	// Every mutating (or compute-heavy) route goes through the requireAuth seam;
+	// it enforces the bearer token when one is configured.
+	mux.HandleFunc("POST /api/collections", s.requireAuth(s.handleCreateCollection))
+	mux.HandleFunc("DELETE /api/collections/{name}", s.requireAuth(s.handleDeleteCollection))
+	mux.HandleFunc("POST /api/ingest", s.requireAuth(s.handleIngest))
 	mux.HandleFunc("POST /api/memories", s.requireAuth(s.handleRemember))
 	mux.HandleFunc("DELETE /api/memories/{id}", s.requireAuth(s.handleForget))
-	mux.HandleFunc("POST /api/eval", s.handleEval)
+	mux.HandleFunc("POST /api/eval", s.requireAuth(s.handleEval))
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
 	mux.HandleFunc("GET /api/jobs/{id}/stream", s.handleJobStream)
 	if s.ui != nil {

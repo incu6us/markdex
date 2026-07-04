@@ -130,6 +130,7 @@ func serveAPI(
 		Jobs:         manager,
 		Model:        model,
 		UI:           embeddedUI(logger),
+		Token:        os.Getenv("MARKDEX_API_TOKEN"),
 		Logger:       logger,
 	})
 
