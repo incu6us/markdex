@@ -541,8 +541,70 @@ func TestHandleIngestGithubRepoPrune(t *testing.T) {
 
 	ingester.mu.Lock()
 	defer ingester.mu.Unlock()
-	if got := ingester.spec.ReconcileScope; got != "https://raw.githubusercontent.com/o/r/" {
-		t.Fatalf("ReconcileScope = %q, want the repo prefix", got)
+	if got := ingester.spec.ReconcileScope; got != "https://raw.githubusercontent.com/o/r/main/" {
+		t.Fatalf("ReconcileScope = %q, want the listing's common prefix (incl. ref)", got)
+	}
+}
+
+// The prune scope must come from the LISTING, not the repo: re-ingesting a
+// subpath (or another branch) with prune must never delete chunks for files
+// that still exist outside it.
+func TestHandleIngestPruneScopeFollowsListing(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		urls  []string
+		scope string
+	}{
+		{
+			name: "subpath listing scopes to the subpath",
+			urls: []string{
+				"https://raw.githubusercontent.com/o/r/main/docs/a.md",
+				"https://raw.githubusercontent.com/o/r/main/docs/sub/b.md",
+			},
+			scope: "https://raw.githubusercontent.com/o/r/main/docs/",
+		},
+		{
+			name: "branch listing scopes to that branch",
+			urls: []string{
+				"https://raw.githubusercontent.com/o/r/dev/a.md",
+				"https://raw.githubusercontent.com/o/r/dev/b.md",
+			},
+			scope: "https://raw.githubusercontent.com/o/r/dev/",
+		},
+		{
+			name:  "single file scopes to its directory",
+			urls:  []string{"https://raw.githubusercontent.com/o/r/main/docs/only.md"},
+			scope: "https://raw.githubusercontent.com/o/r/main/docs/",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			lister := &stubRepoLister{urls: tc.urls}
+			ingester := &capturingIngester{}
+			handler := newTestServer(t, testDeps{repoLister: lister, ingester: ingester})
+
+			rec := doRequest(t, handler, http.MethodPost, "/api/ingest", map[string]any{
+				"source":     map[string]any{"type": "github_repo", "url": "https://github.com/o/r"},
+				"collection": "go-guide",
+				"prune":      true,
+			})
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body)
+			}
+			jobID := decodeBody[struct {
+				JobID string `json:"job_id"`
+			}](t, rec).JobID
+			waitForJob(t, handler, jobID)
+
+			ingester.mu.Lock()
+			defer ingester.mu.Unlock()
+			if got := ingester.spec.ReconcileScope; got != tc.scope {
+				t.Fatalf("ReconcileScope = %q, want %q", got, tc.scope)
+			}
+		})
 	}
 }
 

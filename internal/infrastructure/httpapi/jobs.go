@@ -58,8 +58,8 @@ type IngestSpec struct {
 	ReconcileScope string
 }
 
-// rawScope returns the scheme://host/owner/repo/ prefix of a raw GitHub file URL,
-// used to scope reconciliation to a single repo's source_ids.
+// rawScope returns the scheme://host/owner/repo/ prefix of a raw GitHub file URL.
+// It is a sanity floor for listingScope, never the reconcile scope itself.
 func rawScope(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -70,6 +70,41 @@ func rawScope(rawURL string) string {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host + "/" + parts[0] + "/" + parts[1] + "/"
+}
+
+// listingScope returns the longest common directory prefix of the listed raw
+// URLs — the reconcile scope. Deriving it from the listing itself means it
+// always carries the ref and subpath, so pruning can never reach files outside
+// what was just listed (re-ingesting a subpath or another branch must not
+// delete chunks for files that still exist in the repo).
+//
+// When every listed file happens to share a directory deeper than the
+// requested subpath, the scope is narrower than the request and orphans
+// outside it survive until a broader re-ingest — under-pruning is the safe
+// direction, data loss is not.
+func listingScope(urls []string) string {
+	if len(urls) == 0 {
+		return ""
+	}
+	prefix := urls[0]
+	for _, u := range urls[1:] {
+		for !strings.HasPrefix(u, prefix) {
+			prefix = prefix[:len(prefix)-1]
+			if prefix == "" {
+				return ""
+			}
+		}
+	}
+	i := strings.LastIndexByte(prefix, '/')
+	if i < 0 {
+		return ""
+	}
+	scope := prefix[:i+1]
+	// Sanity floor: the scope must stay within a single repo prefix.
+	if repo := rawScope(urls[0]); repo == "" || !strings.HasPrefix(scope, repo) {
+		return ""
+	}
+	return scope
 }
 
 type Ingester interface {
@@ -211,7 +246,12 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 		spec.URLs = urls
 		if req.Prune && len(urls) > 0 {
-			spec.ReconcileScope = rawScope(urls[0])
+			spec.ReconcileScope = listingScope(urls)
+			if spec.ReconcileScope == "" {
+				// Never silently skip a reconciliation the caller asked for.
+				s.logger.Warn("prune requested but no reconcile scope could be derived; skipping prune",
+					"collection", req.Collection, "url", req.Source.URL)
+			}
 		}
 	case "upload_dir":
 		if len(req.Source.Files) == 0 {
