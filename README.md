@@ -80,10 +80,10 @@ binary is pure Go (no native dependencies — all ML lives in the sidecar). See
 | `make build`      | `ui-build`, then build one self-contained binary → `bin/markdex-$(GOOS)-$(GOARCH)` |
 | `make test`       | `go test ./...` |
 | `make docker-build`| `docker compose build app` (rebuild the app image after code changes) |
-| `make docker-up`  | `docker compose up --build -d` (app + Qdrant) |
+| `make docker-up`  | `docker compose up --build -d` (app + embedder + Qdrant) |
 | `make docker-stop`| `docker compose stop` (stop containers, keep them + volumes) |
 | `make docker-down`| `docker compose down` (`ARGS=-v` also removes volumes) |
-| `make docker-logs`| follow app + Qdrant logs |
+| `make docker-logs`| follow the services' logs |
 
 Overridable variables: `ADDR` (default `:4334`), `QDRANT_URL`, `QDRANT_VERSION` (default
 `v1.18.2`), `GOOS`/`GOARCH`, and `BIN`. Set them inline, e.g.
@@ -211,7 +211,7 @@ Endpoints:
 | `POST /api/collections` | Create a collection sized for the embedding model. |
 | `DELETE /api/collections/{name}` | Delete a collection and all its points → `204`. |
 | `GET /api/collections/{name}/headings` | Distinct `heading_path`s in a collection (for authoring golden sets). |
-| `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }`. |
+| `POST /api/ingest` | Validate + enqueue an async ingest job → `202 { job_id }` (`503` when the ingest queue is full — retry later). |
 | `POST /api/search` | Hybrid + reranked search → `{ results: [{ id, score, document, metadata }] }`. `expand: true` returns each hit's full enclosing section (parent-document retrieval). |
 | `POST /api/memories` | Store an agent **memory** (supersede-or-append) → `201 { source_id, superseded, version }`. Optional `supersede_threshold` (0,1] overrides the merge cutoff for this write. |
 | `GET /api/collections/{name}/memories` | List a collection's memories (newest first) → `{ memories: [{ source_id, document, author, namespace, created_at, updated_at, version, tags }] }`. |
@@ -439,7 +439,7 @@ Four **read-only** discovery/retrieval tools and two **write** tools for agent m
 | `list_collections` | — | every collection with its point count + dimension |
 | `list_headings` | `{ collection }` | the collection's heading paths (valid `heading_path` filters) |
 | `search` | `{ collection, query, top_k?, expand?, filter? }` | reranked chunks, or full sections with `expand` (`top_k` defaults to 8, capped at 100); `filter` is the REST API's exact-match metadata filter, e.g. `{"type": "memory"}` to search only memories |
-| `list_memories` | `{ collection }` | the collection's memories (newest first) with `source_id`, author, version, tags — the id `forget` needs |
+| `list_memories` | `{ collection }` | the collection's memories (newest first) with `source_id`, author, namespace, created/updated timestamps, version, tags — the id `forget` needs |
 | `remember` | `{ collection, text, author?, namespace?, tags? }` | `{ source_id, superseded, version }` — stores a fact (supersede-or-append) |
 | `forget` | `{ collection, id }` | deletes a memory by `source_id` |
 
