@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/incu6us/markdex/internal/domain"
@@ -31,6 +32,16 @@ func WithDedup(threshold float64) Option {
 	return func(s *IngestService) { s.dedupThreshold = threshold }
 }
 
+// WithLogger injects the logger used for non-fatal ingest diagnostics (e.g. the
+// token-budget truncation warning).
+func WithLogger(logger *slog.Logger) Option {
+	return func(s *IngestService) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
+}
+
 // WithTokenBudget re-splits any chunk whose embedded text exceeds maxTokens, using
 // real token counts from counter, so every stored chunk fits the model window.
 func WithTokenBudget(counter domain.TokenCounter, maxTokens int) Option {
@@ -52,6 +63,7 @@ type IngestService struct {
 	dedupThreshold float64
 	tokenCounter   domain.TokenCounter
 	maxTokens      int
+	logger         *slog.Logger
 }
 
 func NewIngestService(
@@ -72,6 +84,7 @@ func NewIngestService(
 		repo:      repo,
 		batchSize: batchSize,
 		report:    func(int, int) {},
+		logger:    slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -179,15 +192,39 @@ func (s *IngestService) enforceTokenBudget(ctx context.Context, chunks []domain.
 			return chunks, nil
 		}
 	}
-	return chunks, nil // best effort after the bounded number of passes
+
+	// Passes exhausted: anything still over budget will be truncated by the
+	// embedder — that must never be silent (README promise). Reachable only in
+	// pathological cases, e.g. a heading-path breadcrumb alone near the window.
+	texts := make([]string, len(chunks))
+	for i, c := range chunks {
+		texts[i] = c.ContextualText()
+	}
+	counts, err := s.tokenCounter.CountTokens(ctx, texts)
+	if err != nil {
+		return nil, err
+	}
+	for i, c := range chunks {
+		if i < len(counts) && counts[i] > s.maxTokens {
+			s.logger.Warn("chunk still exceeds the token budget after re-splitting; the embedder will truncate it",
+				"source_id", c.SourceID(), "heading_path", c.HeadingPath(),
+				"tokens", counts[i], "max_tokens", s.maxTokens)
+		}
+	}
+	return chunks, nil // best effort, loudly
 }
 
 // splitChunkByRunes splits an over-budget chunk's content into rune windows sized,
 // from the measured runes-per-token, to land under maxTokens (with headroom).
+// The budget applies to the EMBEDDED text (breadcrumb + content), so the
+// breadcrumb's rune cost is subtracted from every window — otherwise pieces
+// with long heading paths stay over budget and burn re-split passes.
 func splitChunkByRunes(c domain.Chunk, tokenCount, maxTokens int) ([]domain.Chunk, error) {
 	runes := []rune(c.Content())
-	perToken := float64(len(runes)) / float64(tokenCount)
-	window := max(int(perToken*float64(maxTokens)*0.85), 1)
+	contextualRunes := len([]rune(c.ContextualText()))
+	breadcrumbRunes := contextualRunes - len(runes)
+	perToken := float64(contextualRunes) / float64(tokenCount)
+	window := max(int(perToken*float64(maxTokens)*0.85)-breadcrumbRunes, 1)
 
 	var pieces []domain.Chunk
 	for start := 0; start < len(runes); start += window {

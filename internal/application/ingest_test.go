@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"log/slog"
 	"errors"
 	"fmt"
 	"strings"
@@ -358,5 +359,90 @@ func TestIngestServicePropagatesChunkerError(t *testing.T) {
 
 	if _, err := service.Ingest(context.Background()); !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want %v", err, wantErr)
+	}
+}
+
+// countingCounter is runeCounter plus an invocation count, to pin how many
+// passes the budget loop needs.
+type countingCounter struct{ calls int }
+
+func (c *countingCounter) CountTokens(ctx context.Context, texts []string) ([]int, error) {
+	c.calls++
+	return runeCounter{}.CountTokens(ctx, texts)
+}
+
+// The re-split window must account for the heading-path breadcrumb (it is part
+// of the embedded text): a chunk with a breadcrumb converges in ONE split pass
+// (initial count + verify = 2 counter calls), not by shrinking over retries.
+func TestIngestBudgetAccountsForBreadcrumb(t *testing.T) {
+	t.Parallel()
+
+	doc := document(t, "docs/bc.md")
+	content := strings.Repeat("a", 100)
+	chunker := &fakeChunker{split: func(domain.Document) ([]domain.Chunk, error) {
+		c, err := domain.NewChunk(domain.ChunkParams{
+			SourceID: doc.Path(), Index: 0, Title: "T",
+			HeadingPath: "topic/deep-section", // non-empty breadcrumb
+			Content:     content,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return []domain.Chunk{c}, nil
+	}}
+	repo := newFakeRepository()
+	counter := &countingCounter{}
+	service := application.NewIngestService(
+		&fakeSource{documents: []domain.Document{doc}}, chunker, &fakeEmbedder{dimension: 8}, repo, 16,
+		application.WithTokenBudget(counter, 30),
+	)
+
+	if _, err := service.Ingest(context.Background()); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	for i, ec := range repo.bySource[doc.Path()] {
+		if n := len([]rune(ec.Chunk.ContextualText())); n > 30 {
+			t.Fatalf("piece %d embeds %d tokens, exceeds budget 30 (breadcrumb not budgeted)", i, n)
+		}
+	}
+	if counter.calls != 2 {
+		t.Fatalf("counter calls = %d, want 2 (initial + verify — one split pass)", counter.calls)
+	}
+}
+
+// When the budget cannot be met (breadcrumb alone over budget), ingest still
+// succeeds best-effort but must WARN — truncation is never silent.
+func TestIngestWarnsWhenBudgetUnmeetable(t *testing.T) {
+	t.Parallel()
+
+	doc := document(t, "docs/warn.md")
+	chunker := &fakeChunker{split: func(domain.Document) ([]domain.Chunk, error) {
+		c, err := domain.NewChunk(domain.ChunkParams{
+			SourceID: doc.Path(), Index: 0, Title: "T",
+			HeadingPath: "an-extremely-long-heading-path/that-alone-exceeds-the-budget",
+			Content:     strings.Repeat("a", 50),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return []domain.Chunk{c}, nil
+	}}
+	repo := newFakeRepository()
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	service := application.NewIngestService(
+		&fakeSource{documents: []domain.Document{doc}}, chunker, &fakeEmbedder{dimension: 8}, repo, 16,
+		application.WithTokenBudget(runeCounter{}, 10),
+		application.WithLogger(logger),
+	)
+
+	if _, err := service.Ingest(context.Background()); err != nil {
+		t.Fatalf("ingest must stay best-effort, got error: %v", err)
+	}
+	if len(repo.bySource[doc.Path()]) == 0 {
+		t.Fatal("best-effort chunks must still be stored")
+	}
+	if !strings.Contains(logBuf.String(), "token budget") {
+		t.Fatalf("expected a token-budget warning, log: %q", logBuf.String())
 	}
 }

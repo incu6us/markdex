@@ -251,6 +251,7 @@ func (c *chunkIngester) Ingest(ctx context.Context, spec httpapi.IngestSpec, rep
 		application.WithProgress(report),
 		application.WithDedup(dedupThreshold),
 		application.WithTokenBudget(c.counter, embedderMaxTokens),
+		application.WithLogger(c.logger),
 	)
 
 	result, err := service.Ingest(ctx)
