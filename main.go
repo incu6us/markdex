@@ -49,7 +49,15 @@ func main() {
 	addr := flag.String("addr", ":4334", "HTTP listen address")
 	poolSize := flag.Int("pool", defaultPoolSize, "rerank candidate pool size (lower = faster search, higher = better recall)")
 	supersedeThreshold := flag.Float64("supersede-threshold", memorySupersedeThreshold, "rerank-score cutoff above which a new memory replaces a near-identical one (higher = more conservative)")
+	quantBits := flag.Int("quant-bits", envIntOr("MARKDEX_QUANT_BITS", 0), "TurboQuant scalar quantization on the dense vector for collections created from now on: 0=off, 1/2/4=bits (2 is the near-lossless ~16x sweet spot)")
+	quantOnDisk := flag.Bool("quant-on-disk", envBoolOr("MARKDEX_QUANT_ON_DISK", false), "store float32 dense originals on disk when quantizing (required for the RAM savings; only takes effect with -quant-bits > 0)")
 	flag.Parse()
+
+	switch *quantBits {
+	case 0, 1, 2, 4:
+	default:
+		log.Fatalf("invalid -quant-bits %d: must be 0 (off), 1, 2, or 4", *quantBits)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -67,6 +75,11 @@ func main() {
 		DenseDimension: info.DenseDim,
 		DenseVector:    info.DenseName,
 		SparseVector:   info.SparseName,
+		QuantBits:      *quantBits,
+		QuantOnDisk:    *quantOnDisk,
+	}
+	if *quantBits > 0 {
+		logger.Info("TurboQuant enabled for new collections", "bits", *quantBits, "on_disk", *quantOnDisk)
 	}
 	model := httpapi.ModelInfo{Dimension: info.DenseDim, VectorName: info.DenseName}
 
@@ -431,6 +444,24 @@ func (c *collectionLister) List(ctx context.Context) ([]httpapi.Collection, erro
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envIntOr(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func envBoolOr(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	return fallback
 }

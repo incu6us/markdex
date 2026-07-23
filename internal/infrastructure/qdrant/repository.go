@@ -46,12 +46,26 @@ func (r *Repository) Prepare(ctx context.Context) error {
 		return nil
 	}
 
+	dense := map[string]any{
+		"size":     r.schema.DenseDimension,
+		"distance": "Cosine",
+	}
+	// TurboQuant: quantized copy stays in RAM (fast search); originals go on disk so
+	// the RAM footprint actually shrinks. Without on_disk Qdrant keeps both copies.
+	if r.schema.QuantBits > 0 {
+		dense["quantization_config"] = map[string]any{
+			"turbo": map[string]any{
+				"bits":       fmt.Sprintf("bits%d", r.schema.QuantBits),
+				"always_ram": true,
+			},
+		}
+		if r.schema.QuantOnDisk {
+			dense["on_disk"] = true
+		}
+	}
 	body := map[string]any{
 		"vectors": map[string]any{
-			r.schema.DenseVector: map[string]any{
-				"size":     r.schema.DenseDimension,
-				"distance": "Cosine",
-			},
+			r.schema.DenseVector: dense,
 		},
 		"sparse_vectors": map[string]any{
 			r.schema.SparseVector: map[string]any{},

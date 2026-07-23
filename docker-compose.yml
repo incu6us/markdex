@@ -40,6 +40,11 @@ services:
       # Optional: when set, mutating API routes require "Authorization: Bearer <token>".
       # Unset keeps the API open (single-user default).
       MARKDEX_API_TOKEN: ${MARKDEX_API_TOKEN:-}
+      # Optional: TurboQuant scalar quantization on the dense vector for collections
+      # created from now on (0=off, 2=near-lossless ~16x). ON_DISK is required for the
+      # RAM savings (stores float32 originals on disk). See README "TurboQuant".
+      MARKDEX_QUANT_BITS: ${MARKDEX_QUANT_BITS:-0}
+      MARKDEX_QUANT_ON_DISK: ${MARKDEX_QUANT_ON_DISK:-false}
     ports:
       - "4334:4334"
 

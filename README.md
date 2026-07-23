@@ -180,11 +180,46 @@ dimension + vector names from the sidecar's `/info` to size collections.
 | `-embedder`  | `http://localhost:8000` | Embedder sidecar base URL (`EMBEDDER_URL` env)      |
 | `-pool`      | `24`                    | Rerank candidate pool (lower = faster, higher = better recall) |
 | `-supersede-threshold` | `0.97`        | Memory write: rerank-score cutoff above which a new memory replaces a near-identical one (higher = more conservative). Calibrated; tune per corpus. |
+| `-quant-bits`   | `0` (off)          | TurboQuant scalar quantization on the dense vector for collections created from now on: `1`/`2`/`4` bits (`2` is the near-lossless ~16× sweet spot). `MARKDEX_QUANT_BITS` env. Existing collections are unchanged. |
+| `-quant-on-disk`| `false`            | Store the float32 dense originals on disk when quantizing (quantized copy stays in RAM). **Required for the RAM savings** — without it Qdrant keeps both copies in RAM. Only takes effect with `-quant-bits > 0`. `MARKDEX_QUANT_ON_DISK` env. |
 
 `QDRANT_API_KEY` is read from the environment and sent as the `api-key` header when set.
 `MARKDEX_API_TOKEN`, when set, requires `Authorization: Bearer <token>` on every mutating
 route (unset = open, single-user default). Per-document `max_chars` and `overlap` are set
 per ingest request.
+
+### TurboQuant (dense-vector quantization)
+
+Qdrant 1.18+ can scalar-quantize the dense vector to shrink its RAM footprint. On a
+BGE‑M3 corpus, **2‑bit** is near-lossless — recall@10 ≈ 0.998 with no rescore, at **~16×**
+less vector memory (1024‑d float32 = 4096 B → 256 B/vec).
+
+Enable it with `-quant-bits 2 -quant-on-disk` (or `MARKDEX_QUANT_BITS=2
+MARKDEX_QUANT_ON_DISK=true`). Both matter:
+
+- **`-quant-bits`** adds `quantization_config.turbo.bits2` (`always_ram: true`) so the
+  quantized copy is searched from RAM.
+- **`-quant-on-disk`** sets `on_disk: true` on the dense vector, moving the float32
+  originals to disk. **Without it there is no RAM win** — Qdrant keeps both the originals
+  *and* the quantized copy in RAM. The originals are only read for optional rescoring,
+  which markdex doesn't do, so on-disk is effectively free here.
+
+**New collections only.** The flags apply when a collection is *created*; collections that
+already exist are untouched. To convert existing collections, `PATCH` each one (Qdrant
+re-quantizes on the next optimize):
+
+```bash
+curl -sS -X PATCH "$QDRANT_URL/collections/<name>" \
+  ${QDRANT_API_KEY:+-H "api-key: $QDRANT_API_KEY"} \
+  -H 'content-type: application/json' -d '{
+    "vectors": { "bge-m3-dense": { "on_disk": true } },
+    "quantization_config": { "turbo": { "bits": "bits2", "always_ram": true } }
+  }'
+```
+
+Sparse vectors aren't scalar-quantized, so they're left as-is. Re-validate recall at your
+real corpus size — quantization error grows with collection size (vendor reports ~0.82 on
+harder million-scale sets), so add search-time rescoring if recall drops.
 
 ### Tuning search latency
 

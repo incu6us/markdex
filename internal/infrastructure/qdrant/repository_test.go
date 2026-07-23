@@ -234,6 +234,62 @@ func TestRepositoryPrepare(t *testing.T) {
 		}
 	})
 
+	t.Run("adds turbo quantization + on_disk to the dense vector when configured", func(t *testing.T) {
+		t.Parallel()
+		rec := &recorder{exists: false}
+		server := httptest.NewServer(rec.handler(t))
+		t.Cleanup(server.Close)
+		schema := testSchema
+		schema.QuantBits = 2
+		schema.QuantOnDisk = true
+		repo := qdrant.NewRepository(server.URL, "", testCollection, schema)
+		if err := repo.Prepare(context.Background()); err != nil {
+			t.Fatalf("prepare: %v", err)
+		}
+
+		var create *recordedRequest
+		for _, call := range rec.calls() {
+			if call.method == http.MethodPut && strings.HasSuffix(call.path, "/collections/"+testCollection) {
+				c := call
+				create = &c
+			}
+		}
+		if create == nil {
+			t.Fatal("expected a PUT to create the collection")
+		}
+		dense := create.body["vectors"].(map[string]any)[schema.DenseVector].(map[string]any)
+		if dense["on_disk"] != true {
+			t.Errorf("on_disk = %v, want true", dense["on_disk"])
+		}
+		turbo := dense["quantization_config"].(map[string]any)["turbo"].(map[string]any)
+		if turbo["bits"] != "bits2" {
+			t.Errorf("bits = %v, want bits2", turbo["bits"])
+		}
+		if turbo["always_ram"] != true {
+			t.Errorf("always_ram = %v, want true", turbo["always_ram"])
+		}
+	})
+
+	t.Run("omits quantization when unconfigured", func(t *testing.T) {
+		t.Parallel()
+		repo, rec := newRepository(t, false)
+		if err := repo.Prepare(context.Background()); err != nil {
+			t.Fatalf("prepare: %v", err)
+		}
+		for _, call := range rec.calls() {
+			if call.method != http.MethodPut {
+				continue
+			}
+			dense := call.body["vectors"].(map[string]any)[testSchema.DenseVector].(map[string]any)
+			if _, ok := dense["quantization_config"]; ok {
+				t.Errorf("unexpected quantization_config: %v", dense)
+			}
+			if _, ok := dense["on_disk"]; ok {
+				t.Errorf("unexpected on_disk: %v", dense)
+			}
+		}
+	})
+
 	t.Run("skips creation when collection exists", func(t *testing.T) {
 		t.Parallel()
 		repo, rec := newRepository(t, true)
