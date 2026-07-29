@@ -151,3 +151,74 @@ func fill(t *testing.T, m *JobManager, ing *blockingIngester, n int) []string {
 	}
 	return ids
 }
+
+func TestWorkerCountBoundsConcurrentIngests(t *testing.T) {
+	t.Parallel()
+	ing := newBlockingIngester()
+	m := NewJobManager(ing, discardLogger(), WithWorkers(3))
+	m.Start()
+	defer m.Stop()
+
+	for i := range 4 {
+		if _, err := m.Submit(IngestSpec{Collection: string(rune('a' + i))}); err != nil {
+			t.Fatalf("submit %d: %v", i, err)
+		}
+	}
+
+	// Exactly the configured number of workers may be embedding at once: the
+	// embedder is CPU-bound and shared with live voice traffic, so this bound is
+	// what keeps an upload from starving a call.
+	for i := range 3 {
+		select {
+		case <-ing.started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d of 3 workers picked up a job", i)
+		}
+	}
+	select {
+	case c := <-ing.started:
+		t.Fatalf("a 4th job (%q) started while 3 workers were busy", c)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(ing.release)
+}
+
+func TestQueueDepthIsConfigurable(t *testing.T) {
+	t.Parallel()
+	ing := newBlockingIngester()
+	m := NewJobManager(ing, discardLogger(), WithQueueDepth(2))
+	m.Start()
+	defer m.Stop()
+
+	// 1 in-flight + 2 buffered fit; the next submission is refused rather than
+	// queued behind an unbounded backlog.
+	fill(t, m, ing, 3)
+	if _, err := m.Submit(IngestSpec{Collection: "overflow"}); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("err = %v, want ErrQueueFull once the configured depth is used up", err)
+	}
+}
+
+func TestJobManagerDefaultsStaySingleWorkerAndDeepQueue(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		opts    []JobManagerOption
+		workers int
+		depth   int
+	}{
+		{name: "no options", workers: 1, depth: 64},
+		{name: "zero is ignored", opts: []JobManagerOption{WithWorkers(0), WithQueueDepth(0)}, workers: 1, depth: 64},
+		{name: "negative is ignored", opts: []JobManagerOption{WithWorkers(-4), WithQueueDepth(-1)}, workers: 1, depth: 64},
+	} {
+		m := NewJobManager(newBlockingIngester(), discardLogger(), tc.opts...)
+		if got := m.workers; got != tc.workers {
+			t.Errorf("%s: workers = %d, want %d", tc.name, got, tc.workers)
+			continue
+		}
+		if got := cap(m.queue); got != tc.depth {
+			t.Errorf("%s: queue depth = %d, want %d", tc.name, got, tc.depth)
+			continue
+		}
+	}
+}

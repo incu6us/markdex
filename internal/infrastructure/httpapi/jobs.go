@@ -126,10 +126,19 @@ var ErrQueueFull = errors.New("ingestion queue is full")
 // being evicted; without it the jobs map grows for the life of the process.
 const jobTTL = time.Hour
 
+// Defaults: one worker, because ingestion is bound by the CPU embedder, which
+// on a shared host competes with latency-sensitive traffic; and a queue deep
+// enough that a burst waits instead of being refused.
+const (
+	defaultWorkers    = 1
+	defaultQueueDepth = 64
+)
+
 type JobManager struct {
 	ingester Ingester
 	logger   *slog.Logger
 	queue    chan task
+	workers  int
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -138,33 +147,62 @@ type JobManager struct {
 	jobs map[string]*Job
 }
 
-func NewJobManager(ingester Ingester, logger *slog.Logger) *JobManager {
+// JobManagerOption tunes the ingestion pool. Non-positive values are ignored so
+// an unset or malformed environment variable keeps the safe default.
+type JobManagerOption func(*JobManager)
+
+// WithWorkers sets how many jobs may be ingested concurrently.
+func WithWorkers(n int) JobManagerOption {
+	return func(m *JobManager) {
+		if n > 0 {
+			m.workers = n
+		}
+	}
+}
+
+// WithQueueDepth sets how many jobs may wait before Submit reports ErrQueueFull.
+func WithQueueDepth(n int) JobManagerOption {
+	return func(m *JobManager) {
+		if n > 0 {
+			m.queue = make(chan task, n)
+		}
+	}
+}
+
+func NewJobManager(ingester Ingester, logger *slog.Logger, opts ...JobManagerOption) *JobManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &JobManager{
+	m := &JobManager{
 		ingester: ingester,
 		logger:   logger,
-		queue:    make(chan task, 64),
+		queue:    make(chan task, defaultQueueDepth),
+		workers:  defaultWorkers,
 		jobs:     make(map[string]*Job),
 		ctx:      ctx,
 		cancel:   cancel,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 func (m *JobManager) Start() {
-	m.wg.Go(func() {
-		for {
-			select {
-			case <-m.ctx.Done():
-				m.failQueued()
-				return
-			case t := <-m.queue:
-				m.run(t)
+	for range m.workers {
+		m.wg.Go(func() {
+			for {
+				select {
+				case <-m.ctx.Done():
+					m.failQueued()
+					return
+				case t := <-m.queue:
+					m.run(t)
+				}
 			}
-		}
-	})
+		})
+	}
 }
 
 // Stop cancels the in-flight job (its context aborts the next network call)

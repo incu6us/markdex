@@ -116,7 +116,12 @@ func serveAPI(
 	logger *slog.Logger,
 ) error {
 	ingester := &chunkIngester{embedder: embedder, counter: embedder, fetcher: github.NewFetcher(), logger: logger, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
-	manager := httpapi.NewJobManager(ingester, logger)
+	// Ingestion is bound by the CPU embedder, which on a shared host competes with
+	// latency-sensitive traffic — raise the worker count only where that CPU is spare.
+	manager := httpapi.NewJobManager(ingester, logger,
+		httpapi.WithWorkers(envIntOr("MARKDEX_INGEST_WORKERS", 0)),
+		httpapi.WithQueueDepth(envIntOr("MARKDEX_INGEST_QUEUE", 0)),
+	)
 	manager.Start()
 	defer manager.Stop()
 
