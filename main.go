@@ -138,13 +138,15 @@ func serveAPI(
 		Deleter:      &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
 		Headings:     &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
 		Searcher:     searcher,
-		Memorizer:    &memorizer{svc: memoryService},
-		MemoryLister: &memoryLister{qdrantURL: qdrantURL, apiKey: apiKey},
-		Jobs:         manager,
-		Model:        model,
-		UI:           embeddedUI(logger),
-		Token:        os.Getenv("MARKDEX_API_TOKEN"),
-		Logger:       logger,
+		Memorizer:     &memorizer{svc: memoryService},
+		MemoryLister:  &memoryLister{qdrantURL: qdrantURL, apiKey: apiKey},
+		SourceLister:  &sourceLister{qdrantURL: qdrantURL, apiKey: apiKey},
+		SourceDeleter: &sourceDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
+		Jobs:          manager,
+		Model:         model,
+		UI:            embeddedUI(logger),
+		Token:         os.Getenv("MARKDEX_API_TOKEN"),
+		Logger:        logger,
 	})
 
 	httpServer := &http.Server{
@@ -379,6 +381,37 @@ func (l *memoryLister) ListMemories(ctx context.Context, collection string) ([]h
 		}
 	}
 	return out, nil
+}
+
+// sourceLister lists a collection's ingested documents for the document-management
+// API, adapting Qdrant's aggregated records to the httpapi shape.
+type sourceLister struct {
+	qdrantURL string
+	apiKey    string
+}
+
+func (l *sourceLister) ListSources(ctx context.Context, collection string) ([]httpapi.Source, error) {
+	repo := qdrant.NewRepository(l.qdrantURL, l.apiKey, collection, domain.CollectionSchema{})
+	stored, err := repo.ListSourceDocs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.Source, len(stored))
+	for i, s := range stored {
+		out[i] = httpapi.Source{SourceID: s.SourceID, Title: s.Title, Chunks: s.Chunks}
+	}
+	return out, nil
+}
+
+// sourceDeleter removes one ingested document (all of its chunks) from a collection.
+type sourceDeleter struct {
+	qdrantURL string
+	apiKey    string
+}
+
+func (d *sourceDeleter) DeleteSource(ctx context.Context, collection, sourceID string) error {
+	repo := qdrant.NewRepository(d.qdrantURL, d.apiKey, collection, domain.CollectionSchema{})
+	return repo.DeleteSources(ctx, []string{sourceID})
 }
 
 type documentSource struct {

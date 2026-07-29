@@ -157,19 +157,47 @@ func (s *stubMemoryLister) ListMemories(_ context.Context, collection string) ([
 	return s.memories, s.err
 }
 
+type stubSourceLister struct {
+	sources       []httpapi.Source
+	err           error
+	gotCollection string
+}
+
+func (s *stubSourceLister) ListSources(_ context.Context, collection string) ([]httpapi.Source, error) {
+	s.gotCollection = collection
+	return s.sources, s.err
+}
+
+type stubSourceDeleter struct {
+	err              error
+	deletedFrom      string
+	deletedSourceIDs []string
+}
+
+func (s *stubSourceDeleter) DeleteSource(_ context.Context, collection, sourceID string) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.deletedFrom = collection
+	s.deletedSourceIDs = append(s.deletedSourceIDs, sourceID)
+	return nil
+}
+
 type testDeps struct {
-	lister       httpapi.CollectionLister
-	creator      httpapi.CollectionCreator
-	deleter      httpapi.CollectionDeleter
-	repoLister   httpapi.RepoLister
-	fetcher      httpapi.Fetcher
-	ingester     httpapi.Ingester
-	searcher     httpapi.Searcher
-	headings     httpapi.HeadingsProvider
-	memorizer    httpapi.Memorizer
-	memoryLister httpapi.MemoryLister
-	token        string
-	model        httpapi.ModelInfo
+	lister        httpapi.CollectionLister
+	creator       httpapi.CollectionCreator
+	deleter       httpapi.CollectionDeleter
+	repoLister    httpapi.RepoLister
+	fetcher       httpapi.Fetcher
+	ingester      httpapi.Ingester
+	searcher      httpapi.Searcher
+	headings      httpapi.HeadingsProvider
+	memorizer     httpapi.Memorizer
+	memoryLister  httpapi.MemoryLister
+	sourceLister  httpapi.SourceLister
+	sourceDeleter httpapi.SourceDeleter
+	token         string
+	model         httpapi.ModelInfo
 }
 
 func newTestServer(t *testing.T, deps testDeps) http.Handler {
@@ -194,12 +222,14 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 		RepoLister:   deps.repoLister,
 		Headings:     deps.headings,
 		Searcher:     deps.searcher,
-		Memorizer:    deps.memorizer,
-		MemoryLister: deps.memoryLister,
-		Jobs:         manager,
-		Model:        deps.model,
-		Token:        deps.token,
-		Logger:       logger,
+		Memorizer:     deps.memorizer,
+		MemoryLister:  deps.memoryLister,
+		SourceLister:  deps.sourceLister,
+		SourceDeleter: deps.sourceDeleter,
+		Jobs:          manager,
+		Model:         deps.model,
+		Token:         deps.token,
+		Logger:        logger,
 	}).Handler()
 }
 

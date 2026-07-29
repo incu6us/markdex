@@ -522,6 +522,83 @@ func TestRepositoryListMemories(t *testing.T) {
 	}
 }
 
+func TestRepositoryListSourceDocs(t *testing.T) {
+	t.Parallel()
+
+	var gotFilter map[string]any
+	page := 0
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/points/scroll") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if f, ok := body["filter"].(map[string]any); ok {
+			gotFilter = f
+		}
+		page++
+		if page == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+				"points": []map[string]any{
+					{"payload": map[string]any{"metadata": map[string]any{
+						"source_id": "05_orders.md", "title": "Orders & delivery", "chunk_index": 0,
+					}}},
+					{"payload": map[string]any{"metadata": map[string]any{
+						"source_id": "05_orders.md", "title": "Orders & delivery", "chunk_index": 1,
+					}}},
+				},
+				"next_page_offset": "p2",
+			}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+			"points": []map[string]any{
+				{"payload": map[string]any{"metadata": map[string]any{
+					"source_id": "01_company.md", "title": "Company", "chunk_index": 0,
+				}}},
+				// A chunk with no source_id must not become a phantom source.
+				{"payload": map[string]any{"metadata": map[string]any{"title": "orphan"}}},
+			},
+			"next_page_offset": nil,
+		}})
+	}
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	t.Cleanup(server.Close)
+
+	repo := qdrant.NewRepository(server.URL, "", "kb", domain.CollectionSchema{})
+	sources, err := repo.ListSourceDocs(context.Background())
+	if err != nil {
+		t.Fatalf("list source docs: %v", err)
+	}
+
+	if page != 2 {
+		t.Errorf("scroll pages = %d, want 2 (pagination followed)", page)
+	}
+	// Memories are excluded, so a memory can never show up as a document.
+	mustNot, ok := gotFilter["must_not"].([]any)
+	if !ok || len(mustNot) != 1 {
+		t.Fatalf("filter = %v, want a must_not clause", gotFilter)
+	}
+	cond := mustNot[0].(map[string]any)
+	if cond["key"] != "metadata.type" || cond["match"].(map[string]any)["value"] != "memory" {
+		t.Errorf("must_not = %v, want metadata.type=memory", cond)
+	}
+
+	want := []qdrant.StoredSource{
+		{SourceID: "01_company.md", Title: "Company", Chunks: 1},
+		{SourceID: "05_orders.md", Title: "Orders & delivery", Chunks: 2},
+	}
+	if len(sources) != len(want) {
+		t.Fatalf("sources = %+v, want %+v", sources, want)
+	}
+	for i := range want {
+		if sources[i] != want[i] {
+			t.Errorf("sources[%d] = %+v, want %+v (sorted by source_id, chunks counted)", i, sources[i], want[i])
+		}
+	}
+}
+
 func sourceIDFromFilter(t *testing.T, body map[string]any) string {
 	t.Helper()
 	filter := body["filter"].(map[string]any)

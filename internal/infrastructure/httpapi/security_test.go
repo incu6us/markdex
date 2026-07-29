@@ -18,8 +18,10 @@ func TestCollectionNameRejectedOnEveryEntryPoint(t *testing.T) {
 	// everything else stays nil: if validation fails to short-circuit, the
 	// handler panics on a nil port and the test fails.
 	handler := newTestServer(t, testDeps{
-		memorizer:    &stubMemorizer{},
-		memoryLister: &stubMemoryLister{},
+		memorizer:     &stubMemorizer{},
+		memoryLister:  &stubMemoryLister{},
+		sourceLister:  &stubSourceLister{},
+		sourceDeleter: &stubSourceDeleter{},
 	})
 
 	bad := "x/points/delete?wait=true"
@@ -34,6 +36,8 @@ func TestCollectionNameRejectedOnEveryEntryPoint(t *testing.T) {
 		{"delete collection", http.MethodDelete, "/api/collections/x%2Fpoints", nil},
 		{"headings", http.MethodGet, "/api/collections/x%2Fpoints/headings", nil},
 		{"list memories", http.MethodGet, "/api/collections/x%2Fpoints/memories", nil},
+		{"list sources", http.MethodGet, "/api/collections/x%2Fpoints/sources", nil},
+		{"delete source", http.MethodDelete, "/api/collections/x%2Fpoints/sources?source_id=a.md", nil},
 		{"ingest", http.MethodPost, "/api/ingest", map[string]any{"collection": bad, "source": map[string]any{"type": "upload", "name": "a.md", "content": "# A\nbody"}}},
 		{"remember", http.MethodPost, "/api/memories", map[string]any{"collection": bad, "text": "fact"}},
 		{"forget", http.MethodDelete, "/api/memories/id1?collection=" + "x%2Fpoints", nil},
@@ -79,13 +83,15 @@ func TestOversizedBodyRejected(t *testing.T) {
 // Authorization: Bearer <token>; read routes stay open.
 func TestTokenAuthGatesMutatingRoutes(t *testing.T) {
 	handler := newTestServer(t, testDeps{
-		token:        "s3cret",
-		creator:      &stubCreator{},
-		deleter:      &stubDeleter{},
-		memorizer:    &stubMemorizer{},
-		memoryLister: &stubMemoryLister{},
-		searcher:     &stubSearcher{},
-		headings:     stubHeadings{},
+		token:         "s3cret",
+		creator:       &stubCreator{},
+		deleter:       &stubDeleter{},
+		memorizer:     &stubMemorizer{},
+		memoryLister:  &stubMemoryLister{},
+		sourceLister:  &stubSourceLister{},
+		sourceDeleter: &stubSourceDeleter{},
+		searcher:      &stubSearcher{},
+		headings:      stubHeadings{},
 	})
 
 	mutating := []struct {
@@ -99,6 +105,7 @@ func TestTokenAuthGatesMutatingRoutes(t *testing.T) {
 		{"delete collection", http.MethodDelete, "/api/collections/c", nil},
 		{"remember", http.MethodPost, "/api/memories", map[string]any{"collection": "c", "text": "fact"}},
 		{"forget", http.MethodDelete, "/api/memories/id1?collection=c", nil},
+		{"delete source", http.MethodDelete, "/api/collections/c/sources?source_id=a.md", nil},
 		{"eval", http.MethodPost, "/api/eval", map[string]any{"collection": "c", "queries": []map[string]any{{"query": "q"}}}},
 	}
 	for _, tc := range mutating {
@@ -123,7 +130,7 @@ func TestTokenAuthGatesMutatingRoutes(t *testing.T) {
 	}
 
 	// Read routes stay open with a token configured.
-	for _, path := range []string{"/api/collections", "/api/collections/c/headings", "/api/collections/c/memories"} {
+	for _, path := range []string{"/api/collections", "/api/collections/c/headings", "/api/collections/c/memories", "/api/collections/c/sources"} {
 		rec := doRequest(t, handler, http.MethodGet, path, nil)
 		if rec.Code == http.StatusUnauthorized {
 			t.Fatalf("GET %s: read route must stay open, got 401", path)

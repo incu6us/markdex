@@ -37,9 +37,11 @@ type Config struct {
 	Deleter      CollectionDeleter
 	Headings     HeadingsProvider
 	Searcher     Searcher
-	Memorizer    Memorizer
-	MemoryLister MemoryLister
-	Jobs         *JobManager
+	Memorizer     Memorizer
+	MemoryLister  MemoryLister
+	SourceLister  SourceLister
+	SourceDeleter SourceDeleter
+	Jobs          *JobManager
 	Model        ModelInfo
 	UI           fs.FS
 	// Token, when non-empty, is required as "Authorization: Bearer <Token>" on
@@ -57,9 +59,11 @@ type Server struct {
 	deleter      CollectionDeleter
 	headings     HeadingsProvider
 	searcher     Searcher
-	memorizer    Memorizer
-	memoryLister MemoryLister
-	jobs         *JobManager
+	memorizer     Memorizer
+	memoryLister  MemoryLister
+	sourceLister  SourceLister
+	sourceDeleter SourceDeleter
+	jobs          *JobManager
 	model        ModelInfo
 	ui           fs.FS
 	token        string
@@ -80,9 +84,11 @@ func NewServer(cfg Config) *Server {
 		deleter:      cfg.Deleter,
 		headings:     cfg.Headings,
 		searcher:     cfg.Searcher,
-		memorizer:    cfg.Memorizer,
-		memoryLister: cfg.MemoryLister,
-		jobs:         cfg.Jobs,
+		memorizer:     cfg.Memorizer,
+		memoryLister:  cfg.MemoryLister,
+		sourceLister:  cfg.SourceLister,
+		sourceDeleter: cfg.SourceDeleter,
+		jobs:          cfg.Jobs,
 		model:        cfg.Model,
 		ui:           cfg.UI,
 		token:        cfg.Token,
@@ -96,11 +102,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/collections", s.handleCollections)
 	mux.HandleFunc("GET /api/collections/{name}/headings", s.handleHeadings)
 	mux.HandleFunc("GET /api/collections/{name}/memories", s.handleListMemories)
+	mux.HandleFunc("GET /api/collections/{name}/sources", s.handleListSources)
 	mux.HandleFunc("POST /api/search", s.handleSearch)
 	// Every mutating (or compute-heavy) route goes through the requireAuth seam;
 	// it enforces the bearer token when one is configured.
 	mux.HandleFunc("POST /api/collections", s.requireAuth(s.handleCreateCollection))
 	mux.HandleFunc("DELETE /api/collections/{name}", s.requireAuth(s.handleDeleteCollection))
+	mux.HandleFunc("DELETE /api/collections/{name}/sources", s.requireAuth(s.handleDeleteSource))
 	mux.HandleFunc("POST /api/ingest", s.requireAuth(s.handleIngest))
 	mux.HandleFunc("POST /api/memories", s.requireAuth(s.handleRemember))
 	mux.HandleFunc("DELETE /api/memories/{id}", s.requireAuth(s.handleForget))

@@ -446,6 +446,79 @@ func (r *Repository) ListMemories(ctx context.Context) ([]StoredMemory, error) {
 	return memories, nil
 }
 
+// StoredSource is one ingested document in a collection, aggregated from its chunks.
+// Ingested chunks carry no timestamp (see Replace), so the chunk count is the only
+// size signal available.
+type StoredSource struct {
+	SourceID string
+	Title    string
+	Chunks   int
+}
+
+// ListSourceDocs scrolls the collection for ingested documents — everything except
+// points tagged metadata.type="memory" — and returns one entry per distinct
+// source_id, sorted by source id, for document management UIs.
+func (r *Repository) ListSourceDocs(ctx context.Context) ([]StoredSource, error) {
+	bySource := map[string]*StoredSource{}
+	var offset any
+	for {
+		body := map[string]any{
+			"limit":        256,
+			"with_payload": []string{"metadata"},
+			"filter": map[string]any{"must_not": []map[string]any{
+				{"key": "metadata.type", "match": map[string]any{"value": "memory"}},
+			}},
+		}
+		if offset != nil {
+			body["offset"] = offset
+		}
+
+		var out struct {
+			Result struct {
+				Points []struct {
+					Payload struct {
+						Metadata struct {
+							SourceID string `json:"source_id"`
+							Title    string `json:"title"`
+						} `json:"metadata"`
+					} `json:"payload"`
+				} `json:"points"`
+				NextPageOffset any `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := r.do(ctx, http.MethodPost, "/collections/"+r.collection+"/points/scroll", body, &out); err != nil {
+			return nil, fmt.Errorf("scroll source docs in %q: %w", r.collection, err)
+		}
+
+		for _, point := range out.Result.Points {
+			m := point.Payload.Metadata
+			if m.SourceID == "" {
+				continue
+			}
+			existing, ok := bySource[m.SourceID]
+			if !ok {
+				bySource[m.SourceID] = &StoredSource{SourceID: m.SourceID, Title: m.Title, Chunks: 1}
+				continue
+			}
+			existing.Chunks++
+			if existing.Title == "" {
+				existing.Title = m.Title
+			}
+		}
+		if out.Result.NextPageOffset == nil {
+			break
+		}
+		offset = out.Result.NextPageOffset
+	}
+
+	sources := make([]StoredSource, 0, len(bySource))
+	for _, s := range bySource {
+		sources = append(sources, *s)
+	}
+	sort.Slice(sources, func(i, j int) bool { return sources[i].SourceID < sources[j].SourceID })
+	return sources, nil
+}
+
 // ListSources scrolls the collection and returns its distinct `metadata.source_id`
 // values (sorted), for reconciliation against the current set of source docs.
 func (r *Repository) ListSources(ctx context.Context) ([]string, error) {
