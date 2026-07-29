@@ -118,10 +118,15 @@ func serveAPI(
 	ingester := &chunkIngester{embedder: embedder, counter: embedder, fetcher: github.NewFetcher(), logger: logger, qdrantURL: qdrantURL, apiKey: apiKey, schema: schema}
 	// Ingestion is bound by the CPU embedder, which on a shared host competes with
 	// latency-sensitive traffic — raise the worker count only where that CPU is spare.
+	ingestWorkers := envIntOr("MARKDEX_INGEST_WORKERS", httpapi.DefaultIngestWorkers)
+	ingestQueue := envIntOr("MARKDEX_INGEST_QUEUE", httpapi.DefaultIngestQueueDepth)
 	manager := httpapi.NewJobManager(ingester, logger,
-		httpapi.WithWorkers(envIntOr("MARKDEX_INGEST_WORKERS", 0)),
-		httpapi.WithQueueDepth(envIntOr("MARKDEX_INGEST_QUEUE", 0)),
+		httpapi.WithWorkers(ingestWorkers),
+		httpapi.WithQueueDepth(ingestQueue),
 	)
+	// Logged because it is the knob operators tune, and an env var that never
+	// reached the container is otherwise indistinguishable from one that did.
+	logger.Info("ingest pool configured", "workers", ingestWorkers, "queue_depth", ingestQueue)
 	manager.Start()
 	defer manager.Stop()
 

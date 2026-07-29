@@ -130,8 +130,8 @@ const jobTTL = time.Hour
 // on a shared host competes with latency-sensitive traffic; and a queue deep
 // enough that a burst waits instead of being refused.
 const (
-	defaultWorkers    = 1
-	defaultQueueDepth = 64
+	DefaultIngestWorkers    = 1
+	DefaultIngestQueueDepth = 64
 )
 
 type JobManager struct {
@@ -177,8 +177,8 @@ func NewJobManager(ingester Ingester, logger *slog.Logger, opts ...JobManagerOpt
 	m := &JobManager{
 		ingester: ingester,
 		logger:   logger,
-		queue:    make(chan task, defaultQueueDepth),
-		workers:  defaultWorkers,
+		queue:    make(chan task, DefaultIngestQueueDepth),
+		workers:  DefaultIngestWorkers,
 		jobs:     make(map[string]*Job),
 		ctx:      ctx,
 		cancel:   cancel,
