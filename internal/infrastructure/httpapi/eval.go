@@ -59,7 +59,9 @@ func (s *Server) handleEval(w http.ResponseWriter, r *http.Request) {
 	ranks := make([]int, len(req.Queries))
 	results := make([]evalQueryResult, len(req.Queries))
 	for i, q := range req.Queries {
-		hits, err := s.searcher.Search(r.Context(), req.Collection, q.Query, topK, domain.Filter{}, false)
+		// Eval measures the full retrieval pipeline, so it always reranks —
+		// scoring fusion order here would report a different system than serves.
+		hits, err := s.searcher.Search(r.Context(), req.Collection, q.Query, topK, domain.Filter{}, false, true)
 		if err != nil {
 			s.logger.Error("eval search failed", "collection", req.Collection, "query", q.Query, "err", err)
 			writeError(w, http.StatusBadGateway, "search failed")

@@ -57,9 +57,12 @@ type SearchParams struct {
 	// Filter optionally restricts results by exact metadata match, e.g.
 	// {"type": "memory"}, {"heading_path": "..."}, {"source_id": "..."}.
 	Filter map[string]string
+	// Rerank is tri-state: nil leaves the choice to the server's default.
+	Rerank *bool
 }
 
-// Search runs hybrid retrieval + reranking against a collection.
+// Search runs hybrid retrieval against a collection, reranked unless the
+// server default or SearchParams.Rerank disables it.
 func (c *Client) Search(ctx context.Context, p SearchParams) ([]Hit, error) {
 	payload := map[string]any{
 		"collection": p.Collection,
@@ -69,6 +72,9 @@ func (c *Client) Search(ctx context.Context, p SearchParams) ([]Hit, error) {
 	}
 	if len(p.Filter) > 0 {
 		payload["filter"] = p.Filter
+	}
+	if p.Rerank != nil {
+		payload["rerank"] = *p.Rerank
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

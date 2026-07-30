@@ -11,7 +11,7 @@ import (
 const defaultSearchTopK = 8
 
 type Searcher interface {
-	Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error)
+	Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand, rerank bool) ([]domain.SearchHit, error)
 }
 
 type searchRequest struct {
@@ -20,6 +20,9 @@ type searchRequest struct {
 	TopK       int               `json:"top_k"`
 	Filter     map[string]string `json:"filter"`
 	Expand     bool              `json:"expand"`
+	// Rerank is tri-state on purpose: absent means "use the server default",
+	// which a plain bool cannot express (false would be indistinguishable).
+	Rerank *bool `json:"rerank,omitempty"`
 }
 
 type searchHit struct {
@@ -52,7 +55,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		topK = defaultSearchTopK
 	}
 
-	hits, err := s.searcher.Search(r.Context(), req.Collection, req.Query, topK, domain.Filter{Match: req.Filter}, req.Expand)
+	rerank := s.rerankDefault
+	if req.Rerank != nil {
+		rerank = *req.Rerank
+	}
+
+	hits, err := s.searcher.Search(r.Context(), req.Collection, req.Query, topK, domain.Filter{Match: req.Filter}, req.Expand, rerank)
 	if err != nil {
 		s.logger.Error("search failed", "collection", req.Collection, "err", err)
 		writeError(w, http.StatusBadGateway, "search failed")

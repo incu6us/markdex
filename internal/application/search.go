@@ -39,7 +39,10 @@ func NewSearchService(
 	}
 }
 
-func (s *SearchService) Search(ctx context.Context, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error) {
+// Search retrieves topK hits. rerank=false skips the cross-encoder: it is ~90%
+// of search latency on CPU, and when the pool is no larger than topK it can only
+// reorder what fusion already picked, never improve the selection.
+func (s *SearchService) Search(ctx context.Context, query string, topK int, filter domain.Filter, expand, rerank bool) ([]domain.SearchHit, error) {
 	if topK < 1 {
 		topK = 1
 	}
@@ -52,7 +55,14 @@ func (s *SearchService) Search(ctx context.Context, query string, topK int, filt
 		return nil, nil
 	}
 
-	candidates, err := s.repo.Search(ctx, vectors[0], s.poolSize, filter)
+	// The pool exists only to give the cross-encoder something to choose from.
+	// Without reranking, over-fetching would just truncate an arbitrary tail, so
+	// ask the index for exactly what the caller wants.
+	poolSize := s.poolSize
+	if !rerank {
+		poolSize = topK
+	}
+	candidates, err := s.repo.Search(ctx, vectors[0], poolSize, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -60,17 +70,27 @@ func (s *SearchService) Search(ctx context.Context, query string, topK int, filt
 		return nil, nil
 	}
 
-	// Rerank against the same contextual text (heading-path breadcrumb + content)
-	// that was embedded, so the cross-encoder can separate near-identical sections.
-	// The returned hit keeps its raw Document.
-	documents := make([]string, len(candidates))
-	for i, candidate := range candidates {
-		documents[i] = domain.ContextualText(candidate.Metadata["heading_path"], candidate.Document)
-	}
-
-	ranked, err := s.reranker.Rerank(ctx, query, documents, topK)
-	if err != nil {
-		return nil, err
+	var ranked []domain.Ranked
+	if rerank {
+		// Rerank against the same contextual text (heading-path breadcrumb + content)
+		// that was embedded, so the cross-encoder can separate near-identical sections.
+		// The returned hit keeps its raw Document.
+		documents := make([]string, len(candidates))
+		for i, candidate := range candidates {
+			documents[i] = domain.ContextualText(candidate.Metadata["heading_path"], candidate.Document)
+		}
+		if ranked, err = s.reranker.Rerank(ctx, query, documents, topK); err != nil {
+			return nil, err
+		}
+	} else {
+		// Keep hybrid-fusion order and its similarity scores. Note these are on a
+		// different scale than the cross-encoder's 0..1 — anything thresholding on
+		// Score must not mix the two.
+		limit := min(topK, len(candidates))
+		ranked = make([]domain.Ranked, limit)
+		for i := range limit {
+			ranked[i] = domain.Ranked{Index: i, Score: candidates[i].Score}
+		}
 	}
 
 	hits := make([]domain.SearchHit, 0, len(ranked))

@@ -42,6 +42,7 @@ type searchInput struct {
 	TopK       int               `json:"top_k,omitempty" jsonschema:"number of results (default 8, max 100)"`
 	Expand     bool              `json:"expand,omitempty" jsonschema:"return the full enclosing section instead of the matched chunk"`
 	Filter     map[string]string `json:"filter,omitempty" jsonschema:"exact-match metadata filter, e.g. {\"type\":\"memory\"} to search only memories, or {\"heading_path\":...}, {\"source_id\":...}, {\"namespace\":...}"`
+	Rerank     *bool             `json:"rerank,omitempty" jsonschema:"rerank hits with the cross-encoder (default: server setting). false is much faster but returns fusion order, which is less precise"`
 }
 
 type searchResult struct {
@@ -71,6 +72,7 @@ func (d *toolDeps) search(ctx context.Context, _ *mcp.CallToolRequest, in search
 		TopK:       in.TopK,
 		Expand:     in.Expand,
 		Filter:     in.Filter,
+		Rerank:     in.Rerank,
 	})
 	if err != nil {
 		return nil, searchOutput{}, err

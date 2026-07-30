@@ -29,21 +29,24 @@ type RepoLister interface {
 }
 
 type Config struct {
-	Chunker      domain.Chunker
-	Fetcher      Fetcher
-	RepoLister   RepoLister
-	Lister       CollectionLister
-	Creator      CollectionCreator
-	Deleter      CollectionDeleter
-	Headings     HeadingsProvider
-	Searcher     Searcher
+	Chunker       domain.Chunker
+	Fetcher       Fetcher
+	RepoLister    RepoLister
+	Lister        CollectionLister
+	Creator       CollectionCreator
+	Deleter       CollectionDeleter
+	Headings      HeadingsProvider
+	Searcher      Searcher
 	Memorizer     Memorizer
 	MemoryLister  MemoryLister
 	SourceLister  SourceLister
 	SourceDeleter SourceDeleter
+	// RerankDefault is the server-wide default for /api/search; a request may
+	// still override it per call. Reranking is ~90% of search latency on CPU.
+	RerankDefault bool
 	Jobs          *JobManager
-	Model        ModelInfo
-	UI           fs.FS
+	Model         ModelInfo
+	UI            fs.FS
 	// Token, when non-empty, is required as "Authorization: Bearer <Token>" on
 	// every mutating route. Empty keeps the API open (single-user default).
 	Token  string
@@ -51,23 +54,24 @@ type Config struct {
 }
 
 type Server struct {
-	chunker      domain.Chunker
-	fetcher      Fetcher
-	repoLister   RepoLister
-	lister       CollectionLister
-	creator      CollectionCreator
-	deleter      CollectionDeleter
-	headings     HeadingsProvider
-	searcher     Searcher
+	chunker       domain.Chunker
+	fetcher       Fetcher
+	repoLister    RepoLister
+	lister        CollectionLister
+	creator       CollectionCreator
+	deleter       CollectionDeleter
+	headings      HeadingsProvider
+	searcher      Searcher
 	memorizer     Memorizer
 	memoryLister  MemoryLister
 	sourceLister  SourceLister
 	sourceDeleter SourceDeleter
 	jobs          *JobManager
-	model        ModelInfo
-	ui           fs.FS
-	token        string
-	logger       *slog.Logger
+	rerankDefault bool
+	model         ModelInfo
+	ui            fs.FS
+	token         string
+	logger        *slog.Logger
 }
 
 func NewServer(cfg Config) *Server {
@@ -76,23 +80,24 @@ func NewServer(cfg Config) *Server {
 		logger = slog.Default()
 	}
 	return &Server{
-		chunker:      cfg.Chunker,
-		fetcher:      cfg.Fetcher,
-		repoLister:   cfg.RepoLister,
-		lister:       cfg.Lister,
-		creator:      cfg.Creator,
-		deleter:      cfg.Deleter,
-		headings:     cfg.Headings,
-		searcher:     cfg.Searcher,
+		chunker:       cfg.Chunker,
+		fetcher:       cfg.Fetcher,
+		repoLister:    cfg.RepoLister,
+		lister:        cfg.Lister,
+		creator:       cfg.Creator,
+		deleter:       cfg.Deleter,
+		headings:      cfg.Headings,
+		searcher:      cfg.Searcher,
 		memorizer:     cfg.Memorizer,
 		memoryLister:  cfg.MemoryLister,
 		sourceLister:  cfg.SourceLister,
 		sourceDeleter: cfg.SourceDeleter,
 		jobs:          cfg.Jobs,
-		model:        cfg.Model,
-		ui:           cfg.UI,
-		token:        cfg.Token,
-		logger:       logger,
+		rerankDefault: cfg.RerankDefault,
+		model:         cfg.Model,
+		ui:            cfg.UI,
+		token:         cfg.Token,
+		logger:        logger,
 	}
 }
 

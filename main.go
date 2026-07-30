@@ -48,6 +48,7 @@ func main() {
 	embedderURL := flag.String("embedder", envOr("EMBEDDER_URL", "http://localhost:8000"), "embedder sidecar base URL")
 	addr := flag.String("addr", ":4334", "HTTP listen address")
 	poolSize := flag.Int("pool", defaultPoolSize, "rerank candidate pool size (lower = faster search, higher = better recall)")
+	rerank := flag.Bool("rerank", true, "rerank search results with the cross-encoder (false = fusion order only; ~10x faster, lower precision). Per-request \"rerank\" overrides this.")
 	supersedeThreshold := flag.Float64("supersede-threshold", memorySupersedeThreshold, "rerank-score cutoff above which a new memory replaces a near-identical one (higher = more conservative)")
 	quantBits := flag.Int("quant-bits", envIntOr("MARKDEX_QUANT_BITS", 0), "TurboQuant scalar quantization on the dense vector for collections created from now on: 0=off, 1/2/4=bits (2 is the near-lossless ~16x sweet spot)")
 	quantOnDisk := flag.Bool("quant-on-disk", envBoolOr("MARKDEX_QUANT_ON_DISK", false), "store float32 dense originals on disk when quantizing (required for the RAM savings; only takes effect with -quant-bits > 0)")
@@ -83,7 +84,7 @@ func main() {
 	}
 	model := httpapi.ModelInfo{Dimension: info.DenseDim, VectorName: info.DenseName}
 
-	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder, schema, model, *poolSize, *supersedeThreshold, logger); err != nil {
+	if err := serveAPI(ctx, *addr, *qdrantURL, os.Getenv("QDRANT_API_KEY"), embedder, schema, model, *poolSize, *rerank, *supersedeThreshold, logger); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
@@ -112,6 +113,7 @@ func serveAPI(
 	schema domain.CollectionSchema,
 	model httpapi.ModelInfo,
 	poolSize int,
+	rerankDefault bool,
 	supersedeThreshold float64,
 	logger *slog.Logger,
 ) error {
@@ -140,14 +142,15 @@ func serveAPI(
 	)
 
 	server := httpapi.NewServer(httpapi.Config{
-		Chunker:      markdown.NewSplitter(embedderMaxChars, defaultOverlap),
-		Fetcher:      github.NewFetcher(),
-		RepoLister:   github.NewRepoLister(),
-		Lister:       &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
-		Creator:      &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
-		Deleter:      &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
-		Headings:     &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
-		Searcher:     searcher,
+		Chunker:       markdown.NewSplitter(embedderMaxChars, defaultOverlap),
+		Fetcher:       github.NewFetcher(),
+		RepoLister:    github.NewRepoLister(),
+		Lister:        &collectionLister{repo: qdrant.NewRepository(qdrantURL, apiKey, "", domain.CollectionSchema{})},
+		RerankDefault: rerankDefault,
+		Creator:       &collectionCreator{qdrantURL: qdrantURL, apiKey: apiKey, schema: schema},
+		Deleter:       &collectionDeleter{qdrantURL: qdrantURL, apiKey: apiKey},
+		Headings:      &headingsProvider{qdrantURL: qdrantURL, apiKey: apiKey},
+		Searcher:      searcher,
 		Memorizer:     &memorizer{svc: memoryService},
 		MemoryLister:  &memoryLister{qdrantURL: qdrantURL, apiKey: apiKey},
 		SourceLister:  &sourceLister{qdrantURL: qdrantURL, apiKey: apiKey},
@@ -309,10 +312,10 @@ type chunkSearcher struct {
 	logger    *slog.Logger
 }
 
-func (s *chunkSearcher) Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error) {
+func (s *chunkSearcher) Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand, rerank bool) ([]domain.SearchHit, error) {
 	repo := qdrant.NewRepository(s.qdrantURL, s.apiKey, collection, s.schema)
 	service := application.NewSearchService(s.embedder, repo, s.reranker, s.poolSize, s.logger)
-	return service.Search(ctx, query, topK, filter, expand)
+	return service.Search(ctx, query, topK, filter, expand, rerank)
 }
 
 // memoryStore is the collection-aware write side for agent memory: it builds a

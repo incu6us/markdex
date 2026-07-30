@@ -110,9 +110,11 @@ type stubSearcher struct {
 	gotCollection string
 	gotQuery      string
 	gotTopK       int
+	gotRerank     bool
 }
 
-func (s *stubSearcher) Search(_ context.Context, collection, query string, topK int, _ domain.Filter, _ bool) ([]domain.SearchHit, error) {
+func (s *stubSearcher) Search(_ context.Context, collection, query string, topK int, _ domain.Filter, _, rerank bool) ([]domain.SearchHit, error) {
+	s.gotRerank = rerank
 	s.gotCollection = collection
 	s.gotQuery = query
 	s.gotTopK = topK
@@ -198,6 +200,7 @@ type testDeps struct {
 	sourceDeleter httpapi.SourceDeleter
 	token         string
 	model         httpapi.ModelInfo
+	rerankDefault bool
 }
 
 func newTestServer(t *testing.T, deps testDeps) http.Handler {
@@ -214,14 +217,15 @@ func newTestServer(t *testing.T, deps testDeps) http.Handler {
 	t.Cleanup(manager.Stop)
 
 	return httpapi.NewServer(httpapi.Config{
-		Chunker:      markdown.NewSplitter(2000, 200),
-		Fetcher:      deps.fetcher,
-		Lister:       deps.lister,
-		Creator:      deps.creator,
-		Deleter:      deps.deleter,
-		RepoLister:   deps.repoLister,
-		Headings:     deps.headings,
-		Searcher:     deps.searcher,
+		Chunker:       markdown.NewSplitter(2000, 200),
+		Fetcher:       deps.fetcher,
+		Lister:        deps.lister,
+		Creator:       deps.creator,
+		Deleter:       deps.deleter,
+		RepoLister:    deps.repoLister,
+		RerankDefault: deps.rerankDefault,
+		Headings:      deps.headings,
+		Searcher:      deps.searcher,
 		Memorizer:     deps.memorizer,
 		MemoryLister:  deps.memoryLister,
 		SourceLister:  deps.sourceLister,
@@ -781,7 +785,7 @@ type mapSearcher struct {
 	byQuery map[string][]domain.SearchHit
 }
 
-func (m mapSearcher) Search(_ context.Context, _, query string, _ int, _ domain.Filter, _ bool) ([]domain.SearchHit, error) {
+func (m mapSearcher) Search(_ context.Context, _, query string, _ int, _ domain.Filter, _, _ bool) ([]domain.SearchHit, error) {
 	return m.byQuery[query], nil
 }
 
@@ -1028,4 +1032,31 @@ func waitForJob(t *testing.T, handler http.Handler, id string) httpapi.Job {
 	}
 	t.Fatal("job did not reach a terminal state in time")
 	return httpapi.Job{}
+}
+
+// rerank is tri-state over the wire: absent means "use the server default", so a
+// deployment can turn reranking off globally while a caller still opts back in.
+func TestHandleSearchRerankResolution(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		rerankDefault bool
+		body          map[string]any
+		want          bool
+	}{
+		{name: "absent uses server default on", rerankDefault: true, body: map[string]any{"collection": "c", "query": "q"}, want: true},
+		{name: "absent uses server default off", rerankDefault: false, body: map[string]any{"collection": "c", "query": "q"}, want: false},
+		{name: "request false overrides default on", rerankDefault: true, body: map[string]any{"collection": "c", "query": "q", "rerank": false}, want: false},
+		{name: "request true overrides default off", rerankDefault: false, body: map[string]any{"collection": "c", "query": "q", "rerank": true}, want: true},
+	}
+	for _, test := range tests {
+		searcher := &stubSearcher{}
+		handler := newTestServer(t, testDeps{searcher: searcher, rerankDefault: test.rerankDefault})
+		doRequest(t, handler, http.MethodPost, "/api/search", test.body)
+		if searcher.gotRerank != test.want {
+			t.Errorf("%s: rerank = %v, want %v", test.name, searcher.gotRerank, test.want)
+			continue
+		}
+	}
 }

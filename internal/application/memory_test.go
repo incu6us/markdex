@@ -15,9 +15,11 @@ type fakeMemorySearcher struct {
 	gotCollection string
 	gotQuery      string
 	gotFilter     domain.Filter
+	gotRerank     bool
 }
 
-func (f *fakeMemorySearcher) Search(_ context.Context, collection, query string, _ int, filter domain.Filter, _ bool) ([]domain.SearchHit, error) {
+func (f *fakeMemorySearcher) Search(_ context.Context, collection, query string, _ int, filter domain.Filter, _, rerank bool) ([]domain.SearchHit, error) {
+	f.gotRerank = rerank
 	f.gotCollection, f.gotQuery, f.gotFilter = collection, query, filter
 	return f.hits, f.err
 }
@@ -344,5 +346,26 @@ func TestMemoryRememberProbeScopedToNamespace(t *testing.T) {
 	}
 	if _, ok := searcher.gotFilter.Match["namespace"]; ok {
 		t.Fatalf("unnamespaced probe must not carry a namespace filter, got %v", searcher.gotFilter.Match)
+	}
+}
+
+// The supersede probe compares against supersedeThreshold (0.97), which is
+// calibrated on cross-encoder scores. It must never inherit a server-wide
+// rerank=false, or it would compare that cutoff against fusion similarity —
+// a different scale — and silently stop superseding.
+func TestMemorySupersedeProbeAlwaysReranks(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeMemorySearcher{}
+	svc := newMemoryService(t, searcher, newFakeMemoryStore())
+
+	if _, err := svc.Remember(context.Background(), application.RememberParams{
+		Collection: "team-memory", Text: "Acme is on legacy billing", Author: "agent:claude-code",
+	}); err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+
+	if !searcher.gotRerank {
+		t.Error("supersede probe searched with rerank=false; the 0.97 threshold would be compared against fusion scores")
 	}
 }

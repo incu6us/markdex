@@ -32,7 +32,7 @@ const (
 // MemorySearcher retrieves existing candidates from a named collection. It is the
 // same hybrid+rerank retrieval used by /api/search, parameterized by collection.
 type MemorySearcher interface {
-	Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand bool) ([]domain.SearchHit, error)
+	Search(ctx context.Context, collection, query string, topK int, filter domain.Filter, expand, rerank bool) ([]domain.SearchHit, error)
 }
 
 // MemoryStore is the collection-aware write side: ensure the collection exists,
@@ -146,8 +146,11 @@ func (s *MemoryService) Remember(ctx context.Context, p RememberParams) (Remembe
 	if ns := strings.TrimSpace(p.Namespace); ns != "" {
 		probe["namespace"] = ns
 	}
+	// rerank=true is not negotiable here: supersedeThreshold (0.97) is calibrated
+	// against cross-encoder scores, so probing with fusion scores would compare
+	// different scales and silently stop superseding.
 	candidates, err := s.searcher.Search(ctx, collection, text, probeTopK,
-		domain.Filter{Match: probe}, false)
+		domain.Filter{Match: probe}, false, true)
 	if err != nil {
 		return RememberResult{}, err
 	}

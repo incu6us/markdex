@@ -39,7 +39,7 @@ func TestSearchServiceReranksCandidates(t *testing.T) {
 	}}
 
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
-	hits, err := service.Search(context.Background(), "q", 2, domain.Filter{}, false)
+	hits, err := service.Search(context.Background(), "q", 2, domain.Filter{}, false, true)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestSearchServiceRerankSeesBreadcrumb(t *testing.T) {
 	}}
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 
-	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, false)
+	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, false, true)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestSearchServiceExpandsToSection(t *testing.T) {
 	}}
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 
-	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, true)
+	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, true, true)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestSearchServiceLogsAndFallsBackWhenExpandFails(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, logger)
 
-	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, true)
+	hits, err := service.Search(context.Background(), "q", 1, domain.Filter{}, true, true)
 	if err != nil {
 		t.Fatalf("expand failure must not fail the whole search: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestSearchServiceEmptyCandidates(t *testing.T) {
 	}}
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 
-	hits, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false)
+	hits, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false, true)
 	if err != nil || hits != nil {
 		t.Fatalf("got %v / %v, want nil/nil", hits, err)
 	}
@@ -161,7 +161,65 @@ func TestSearchServicePropagatesSearchError(t *testing.T) {
 	reranker := &fakeReranker{rerank: func(string, []string, int) ([]domain.Ranked, error) { return nil, nil }}
 	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
 
-	if _, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false); !errors.Is(err, repo.searchErr) {
+	if _, err := service.Search(context.Background(), "q", 5, domain.Filter{}, false, true); !errors.Is(err, repo.searchErr) {
 		t.Fatalf("err = %v, want %v", err, repo.searchErr)
+	}
+}
+
+// Reranking is ~90% of search latency on CPU. Skipping it must also stop
+// over-fetching: the pool exists only to feed the cross-encoder, so without one
+// a larger pool would just truncate an arbitrary tail.
+func TestSearchServiceSkipsRerankAndFetchesOnlyTopK(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	repo.searchHits = []domain.SearchHit{
+		{ID: "a", Score: 0.9, Document: "doc a"},
+		{ID: "b", Score: 0.8, Document: "doc b"},
+	}
+	reranker := &fakeReranker{rerank: func(_ string, _ []string, _ int) ([]domain.Ranked, error) {
+		t.Error("reranker called with rerank=false")
+		return nil, nil
+	}}
+
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
+	hits, err := service.Search(context.Background(), "q", 2, domain.Filter{}, false, false)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if repo.searchTopN != 2 {
+		t.Errorf("repo searched with topN=%d, want 2 (topK, not the 50 pool)", repo.searchTopN)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("got %d hits, want 2", len(hits))
+	}
+	// Fusion order and fusion scores are preserved untouched.
+	if hits[0].ID != "a" || hits[1].ID != "b" {
+		t.Errorf("order = %s,%s; want a,b (fusion order)", hits[0].ID, hits[1].ID)
+	}
+	if hits[0].Score != 0.9 {
+		t.Errorf("score = %v, want the fusion score 0.9", hits[0].Score)
+	}
+}
+
+// topK larger than the candidate set must not panic or pad.
+func TestSearchServiceSkipRerankWithFewerCandidatesThanTopK(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepository()
+	repo.searchHits = []domain.SearchHit{{ID: "only", Score: 0.5, Document: "d"}}
+	reranker := &fakeReranker{rerank: func(_ string, _ []string, _ int) ([]domain.Ranked, error) {
+		t.Error("reranker called with rerank=false")
+		return nil, nil
+	}}
+
+	service := application.NewSearchService(&fakeEmbedder{dimension: 8}, repo, reranker, 50, nil)
+	hits, err := service.Search(context.Background(), "q", 10, domain.Filter{}, false, false)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("got %d hits, want 1", len(hits))
 	}
 }
