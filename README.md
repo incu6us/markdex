@@ -6,6 +6,8 @@ headings into separate topics**, embeds every chunk with **BGE-M3** (dense **+**
 1024-dim, 8k context) via a local Python sidecar, and serves **hybrid search with
 cross-encoder reranking** over a REST API.
 
+> **Need a custom MCP server for your own API, database or internal tool?** I build production-grade ones. [Hire me on Fiverr](https://www.fiverr.com/incu6us/build-a-custom-mcp-server-to-connect-your-tools-to-claude-and-ai-agents).
+
 Three containers, each with one job:
 
 - **app** (Go) — chunking, ingestion orchestration, search API, and the embedded React UI.
